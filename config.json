@@ -1,0 +1,26 @@
+{
+    "app_name": "NetRecon",
+    "version": "2.0.0",
+    "dns": {
+        "timeout": 5,
+        "lifetime": 10,
+        "default_record_type": "A"
+    },
+    "scan": {
+        "default_profile": "native_quick",
+        "default_timing": "T3",
+        "native_concurrency": 8000,
+        "native_timeout": 1.5,
+        "memory_cap_mb": 14000
+    },
+    "geo": {
+        "timeout": 10,
+        "preferred_provider": null
+    },
+    "export": {
+        "default_directory": "~/netrecon_exports"
+    },
+    "database": {
+        "path": null
+    }
+}

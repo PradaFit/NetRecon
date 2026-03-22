@@ -1,0 +1,6 @@
+python-nmap>=0.7.1
+requests>=2.31.0
+dnspython>=2.5.0
+folium>=0.15.0
+customtkinter>=5.2.0
+Pillow>=10.0.0
