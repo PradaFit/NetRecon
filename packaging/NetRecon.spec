@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""
+r"""
 PyInstaller spec for NetRecon.
 
 Build:
@@ -59,8 +59,6 @@ excludes = [
     "unittest",
     "pydoc_data",
     "pytest",
-    "setuptools",
-    "distutils",
 ]
 
 a = Analysis(

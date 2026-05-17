@@ -1,4 +1,4 @@
-"""
+r"""
 Generate packaging\NetRecon.ico from NetRecon_Images\NetRecon_Img_1.png.
 
 Run once before building the installer:
