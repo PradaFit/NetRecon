@@ -4,6 +4,8 @@ NetRecon is a Python network reconnaissance toolkit built for fast DNS lookups, 
 
 Developed by PradaFit.
 
+<img width="1280" height="720" alt="NetRecon_Images/NetRecon_Img_2.png" src="https://github.com/PradaFit/NetRecon/blob/main/NetRecon_Images/NetRecon_Img_2.png?raw=true" />
+
 ## Why NetRecon
 
 Most small recon tools do one thing well and everything else as an afterthought. NetRecon is meant to be the daily-driver version: quick to launch, practical to use, and flexible enough to move between a GUI workflow and terminal-based checks without changing tools.

@@ -24,11 +24,3 @@ Credit requirement:
 
 1. Existing copyright and license notices must remain intact.
 2. Modified versions should clearly state that changes were made and should not imply that PradaFit endorses the fork.
-
-Important limitation:
-
-1. GPLv3 does not force someone to publish a private internal fork they never distribute.
-2. GPLv3 does require source disclosure when they distribute the software or modified versions to others.
-3. Source disclosure does not have to be a public GitHub repository specifically, but it must be made available to the recipients in a GPLv3-compliant way.
-
-This file is an explanatory notice and not a substitute for legal advice. The controlling legal terms are in the LICENSE file.
