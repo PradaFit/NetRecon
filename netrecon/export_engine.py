@@ -1,32 +1,40 @@
 """
 Export results to JSON, CSV, styled HTML, and interactive Leaflet maps.
-All file writes use atomic-ish patterns (write to temp, rename) and
-path traversal is blocked by normalizing against the target directory.
+Path traversal is blocked by resolving the target and verifying it sits
+inside an allowed root (home, system temp, or current working directory).
 """
 
 import json
 import csv
 import os
+import tempfile
 import html as html_mod
 from datetime import datetime
 from pathlib import Path
 
 
+def _is_within(child, parent):
+    """True if `child` is the same as or nested inside `parent` (resolved paths)."""
+    try:
+        child.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
 def _safe_path(filepath):
     """
     Normalize a file path, create parent dirs, and return a Path object.
-    Rejects anything that tries to escape via '..' into system directories.
+    Rejects anything that escapes the user home, system temp, or cwd.
     """
     p = Path(filepath).resolve()
-    # basic safety: don't allow writing outside user home or /tmp
-    home = Path.home().resolve()
-    if not (
-        str(p).startswith(str(home))
-        or str(p).startswith(os.path.realpath(os.environ.get("TEMP", "/tmp")))
-    ):
-        cwd = Path.cwd().resolve()
-        if not str(p).startswith(str(cwd)):
-            raise ValueError(f"Refusing to write to {p} (outside workspace/home/temp)")
+    allowed_roots = [
+        Path.home().resolve(),
+        Path(tempfile.gettempdir()).resolve(),
+        Path.cwd().resolve(),
+    ]
+    if not any(_is_within(p, root) for root in allowed_roots):
+        raise ValueError(f"Refusing to write to {p} (outside workspace/home/temp)")
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -111,6 +119,11 @@ class ExportEngine:
             isp_safe = html_mod.escape(str(loc.get("isp", "N/A")))
             org_safe = html_mod.escape(str(loc.get("org", "N/A")))
             asn_safe = html_mod.escape(str(loc.get("asn", "N/A")))
+            try:
+                lat = float(loc.get("latitude", 0) or 0)
+                lng = float(loc.get("longitude", 0) or 0)
+            except (TypeError, ValueError):
+                lat, lng = 0.0, 0.0
 
             popup = (
                 f"<div style='font-family:sans-serif;min-width:200px'>"
@@ -119,7 +132,7 @@ class ExportEngine:
                 f"<b>ISP:</b> {isp_safe}<br>"
                 f"<b>Org:</b> {org_safe}<br>"
                 f"<b>ASN:</b> {asn_safe}<br>"
-                f"<b>Coords:</b> {loc.get('latitude',0)}, {loc.get('longitude',0)}"
+                f"<b>Coords:</b> {lat}, {lng}"
                 f"</div>"
             )
             folium.Marker(

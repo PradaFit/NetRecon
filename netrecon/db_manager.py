@@ -8,6 +8,7 @@ The database lives in ~/.netrecon/history.db by default.
 
 import sqlite3
 import json
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
@@ -23,7 +24,7 @@ class DatabaseManager:
         self._setup()
 
     def _setup(self):
-        with self._conn() as conn:
+        with closing(self._conn()) as conn, conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
             conn.execute(
@@ -60,7 +61,7 @@ class DatabaseManager:
         blob = json.dumps(result_data, default=str)
         tags_blob = json.dumps(tags) if tags else None
 
-        with self._conn() as conn:
+        with closing(self._conn()) as conn, conn:
             conn.execute(
                 "INSERT INTO scan_history "
                 "(scan_type, target, summary, result_data, timestamp, tags) "
@@ -93,12 +94,12 @@ class DatabaseManager:
         sql += " ORDER BY timestamp DESC LIMIT ?"
         params.append(limit)
 
-        with self._conn() as conn:
+        with closing(self._conn()) as conn:
             conn.row_factory = sqlite3.Row
             return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
     def get_detail(self, scan_id):
-        with self._conn() as conn:
+        with closing(self._conn()) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT * FROM scan_history WHERE id = ?", (int(scan_id),)
@@ -113,16 +114,20 @@ class DatabaseManager:
         return None
 
     def delete(self, scan_id):
-        with self._conn() as conn:
+        with closing(self._conn()) as conn, conn:
             conn.execute("DELETE FROM scan_history WHERE id = ?", (int(scan_id),))
 
     def clear(self):
-        with self._conn() as conn:
+        # delete inside a transaction, then VACUUM on a fresh connection
+        # (VACUUM cannot run inside an open transaction)
+        with closing(self._conn()) as conn, conn:
             conn.execute("DELETE FROM scan_history")
+        with closing(self._conn()) as conn:
+            conn.isolation_level = None
             conn.execute("VACUUM")
 
     def get_stats(self):
-        with self._conn() as conn:
+        with closing(self._conn()) as conn:
             total = conn.execute("SELECT COUNT(*) FROM scan_history").fetchone()[0]
             by_type = conn.execute(
                 "SELECT scan_type, COUNT(*) FROM scan_history GROUP BY scan_type"

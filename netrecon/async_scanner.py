@@ -14,10 +14,7 @@ network conditions and configured concurrency.
 import asyncio
 import socket
 import time
-import sys
-import struct
 from dataclasses import dataclass, field
-from typing import Optional, Callable
 
 from .validator import sanitize_target, parse_port_list, resolve_to_ip, InputError
 
@@ -1211,7 +1208,7 @@ class AsyncPortScanner:
         t0 = time.perf_counter()
 
         try:
-            ip = resolve_to_ip(target)
+            ip = await self._resolve_async(target)
         except InputError as exc:
             return NativeScanResult(target=target, ip="", error=str(exc))
 
@@ -1289,6 +1286,23 @@ class AsyncPortScanner:
             scan_time=elapsed,
             total_scanned=total,
         )
+
+    async def _resolve_async(self, target):
+        """Resolve target to an IP without blocking the event loop."""
+        cleaned = sanitize_target(target)
+        try:
+            socket.inet_aton(cleaned)
+            return cleaned
+        except OSError:
+            pass
+        loop = asyncio.get_running_loop()
+        try:
+            infos = await loop.getaddrinfo(cleaned, None, family=socket.AF_INET)
+        except socket.gaierror:
+            raise InputError(f"Cannot resolve hostname: {cleaned}")
+        if not infos:
+            raise InputError(f"Cannot resolve hostname: {cleaned}")
+        return infos[0][4][0]
 
     async def _probe_with_sem(self, ip, port, sem):
         async with sem:

@@ -168,16 +168,19 @@ class DNSEngine:
 
     def reverse_lookup(self, ip_address):
         try:
-            sanitize_target(ip_address)
-        except InputError as exc:
+            import ipaddress
+            ipaddress.ip_address((ip_address or "").strip())
+        except (ValueError, AttributeError):
             return DNSResult(
-                query=ip_address, record_type="PTR (Reverse)", error=str(exc)
+                query=ip_address,
+                record_type="PTR (Reverse)",
+                error=f"Not a valid IP address: {ip_address}",
             )
 
         try:
-            rev = dns.reversename.from_address(ip_address)
+            rev = dns.reversename.from_address(ip_address.strip())
             t0 = time.perf_counter()
-            answers = dns.resolver.resolve(rev, "PTR")
+            answers = self.resolver.resolve(rev, "PTR")
             elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
             records = [{"value": str(rdata)} for rdata in answers]
             return DNSResult(
@@ -239,6 +242,11 @@ class DNSEngine:
                     return {
                         "success": False,
                         "error": f"NS lookup failed: {ns_result.error}",
+                    }
+                if not ns_result.records:
+                    return {
+                        "success": False,
+                        "error": f"No NS records found for {domain}",
                     }
                 nameserver = str(ns_result.records[0]["value"]).rstrip(".")
 

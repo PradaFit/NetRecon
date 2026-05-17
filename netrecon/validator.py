@@ -13,7 +13,6 @@ import socket
 _DOMAIN_RE = re.compile(
     r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63})*\.[A-Za-z]{2,}$"
 )
-_CIDR_V4_RE = re.compile(r"^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$")
 _PORT_RANGE_RE = re.compile(r"^(\d{1,5}(-\d{1,5})?,?\s*)+$")
 _SAFE_NMAP_RE = re.compile(r"^[A-Za-z0-9\s\-./,:=_]+$")
 
@@ -110,7 +109,19 @@ def sanitize_nmap_args(raw):
     if not _SAFE_NMAP_RE.match(cleaned):
         raise InputError("Nmap arguments contain disallowed characters")
 
-    blocked_patterns = ["--script-args", "-oN", "-oX", "-oG", "-oA", "--resume"]
+    blocked_patterns = [
+        "--script-args",
+        "-oN",
+        "-oX",
+        "-oG",
+        "-oA",
+        "--resume",
+        "-iL",
+        "-iR",
+        "--datadir",
+        "--servicedb",
+        "--versiondb",
+    ]
     lowered = cleaned.lower()
     for bp in blocked_patterns:
         if bp.lower() in lowered:
