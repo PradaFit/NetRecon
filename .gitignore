@@ -21,9 +21,6 @@ netrecon_exports/
 *~
 main4/
 
-# Packaging / installer build artifacts
-packaging/Output/
-packaging/NetRecon.ico
-packaging/LICENSE.txt
-packaging/DISCLAIMER.txt
+# Packaging / installer (kept local, not published to repo)
+packaging/
 
