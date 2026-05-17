@@ -20,3 +20,10 @@ netrecon_exports/
 *.swo
 *~
 main4/
+
+# Packaging / installer build artifacts
+packaging/Output/
+packaging/NetRecon.ico
+packaging/LICENSE.txt
+packaging/DISCLAIMER.txt
+
