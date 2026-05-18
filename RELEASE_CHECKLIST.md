@@ -23,8 +23,11 @@ Microsoft Store submission).
 
 - [ ] `README.md` reflects the latest features and install paths
 - [ ] `DISCLAIMER.md` reviewed for tone and accuracy
+- [ ] `PRIVACY.md` exists and reflects the current build
 - [ ] `LICENSE` unchanged (GPLv3)
 - [ ] `STORE_LISTING_DRAFT.md` reflects the current build
+- [ ] Store listing has a Privacy policy URL
+- [ ] Store listing has a Support URL
 
 ## 4. Windows installer
 
@@ -35,6 +38,8 @@ Microsoft Store submission).
 - [ ] Optional desktop shortcut works
 - [ ] Uninstall preserves `%USERPROFILE%\.netrecon`
 - [ ] Re-install over an existing install does not duplicate shortcuts
+- [ ] App package includes `DISCLAIMER.md`, `PRIVACY.md`, and `LICENSE`
+- [ ] Installer rebuilt after any code or doc change since the last build
 
 ## 5. First-run experience
 
@@ -49,32 +54,34 @@ Microsoft Store submission).
 - [ ] Store logo 300x300
 - [ ] Store logo 150x150
 - [ ] Store wide logo 310x150
-- [ ] Screenshots (1366x768 minimum) for: DNS, Port Scanner, Geolocation, History, About
+- [ ] Screenshots captured at 1366x768 or higher for: DNS, Port Scanner, Geolocation, History, About
 - [ ] Short description fits 200 characters
 - [ ] Full description matches `STORE_LISTING_DRAFT.md`
 - [ ] Keywords entered
 - [ ] Age rating questionnaire completed (utility, no objectionable content)
-- [ ] Privacy policy URL set (point at the repo's PRIVACY notice or README section)
+- [ ] Privacy policy URL set in Partner Center (matches `PRIVACY.md`)
+- [ ] Support URL set in Partner Center
 
 ## 7. Smoke test (manual)
 
 - [ ] Launch GUI
-- [ ] Accept responsible-use notice
+- [ ] First-run Responsible Use notice appears on a clean profile and blocks Continue until checked
 - [ ] DNS Lookup tab: resolve `example.com` A, MX, NS
 - [ ] Port Scanner tab: native quick scan on `127.0.0.1`
 - [ ] Port Scanner tab: confirm Speed dropdown defaults to Balanced
 - [ ] Port Scanner tab: confirm Extreme tier shows the confirmation dialog
 - [ ] Geolocation tab: lookup own public IP
 - [ ] History tab: lists previous scans, opens detail, export works
-- [ ] About window: opens, all three tabs render, links open in browser
+- [ ] About window: opens, all three tabs render, GitHub / Issues / Privacy Policy / Support links open in browser
 - [ ] About > Diagnostics: export creates a sanitized text file
 - [ ] Export to JSON, CSV, HTML each produce a valid file
+- [ ] Clean install of the rebuilt installer tested on Windows 11
 
 ## 8. Security and responsible use
 
 - [ ] No telemetry, analytics, or third-party trackers added
 - [ ] No new shell-out paths added without input validation
-- [ ] Nmap argument allowlist blocks `-iL`, `-iR`, `--datadir`, `--servicedb`, `--servicedb`, `--versiondb`, `-oN`, `-oX`, `-oG`, `-oA`, `--resume`, `--script-args`
+- [ ] Nmap argument allowlist blocks `-iL`, `-iR`, `--datadir`, `--servicedb`, `--versiondb`, `-oN`, `-oX`, `-oG`, `-oA`, `--resume`, `--script-args`
 - [ ] Export paths sandboxed to home, temp, and CWD
 - [ ] SQLite queries are parameterized
 - [ ] Logs do not record targets, payloads, IPs, or full home paths

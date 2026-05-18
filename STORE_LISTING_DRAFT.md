@@ -61,7 +61,7 @@ on first launch.
 - IP geolocation with provider failover
 - Local SQLite scan history with export
 - JSON, CSV, HTML, and interactive map exports
-- No telemetry. No data leaves your machine unless you export it.
+- No telemetry. Scan results, history, preferences, and logs stay on your machine. Geolocation lookups contact public IP lookup APIs only when you trigger them.
 
 ## Keywords
 
@@ -80,6 +80,20 @@ Developer Tools (primary), Utilities & Tools (secondary)
 ## Price
 
 Free
+
+## Privacy policy URL
+
+TODO: Replace with the final hosted URL before submission. Until then,
+the canonical policy lives in the repository:
+https://github.com/PradaFit/NetRecon/blob/main/PRIVACY.md
+
+## Support URL
+
+https://github.com/PradaFit/NetRecon/issues
+
+## Website URL
+
+https://github.com/PradaFit/NetRecon
 
 ## Monetization
 

@@ -6,6 +6,7 @@ Acceptance is persisted to the user's NetRecon preferences file so the
 dialog does not appear on every launch.
 """
 
+import tkinter as tk
 import customtkinter as ctk
 
 from netrecon import preferences, __version__
@@ -22,8 +23,7 @@ NOTICE_TEXT = (
 )
 
 CONFIRM_LABEL = (
-    "I understand NetRecon is intended only for authorized network diagnostics, "
-    "troubleshooting, and security testing."
+    "I understand NetRecon is for authorized network diagnostics and security testing."
 )
 
 
@@ -72,7 +72,7 @@ class ResponsibleUseDialog(ctk.CTkToplevel):
         body.insert("1.0", NOTICE_TEXT)
         body.configure(state="disabled")
 
-        self._agree_var = ctk.BooleanVar(value=False)
+        self._agree_var = tk.BooleanVar(value=False)
         self._checkbox = ctk.CTkCheckBox(
             self,
             text=CONFIRM_LABEL,
@@ -107,9 +107,9 @@ class ResponsibleUseDialog(ctk.CTkToplevel):
 
         ctk.CTkButton(
             btn_row,
-            text="Cancel",
+            text="Exit NetRecon",
             command=self._on_decline,
-            width=100,
+            width=120,
             height=34,
             fg_color=COLORS["bg_input"],
             hover_color=COLORS["bg_card"],

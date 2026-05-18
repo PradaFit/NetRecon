@@ -39,10 +39,14 @@ NetRecon includes both of the workflows most people actually use:
 
 The GUI includes dedicated tabs for:
 
-- Scan
-- DNS
-- Geo
+- DNS Lookup
+- Port Scanner
+- Geolocation
 - History
+
+A built-in **About** window (top-right corner of the main window) exposes the project links, the responsible-use notice, the licence, and a one-click **Export Diagnostic Log** action that produces a sanitized text file for bug reports.
+
+On first launch the GUI shows a short **Responsible Use** notice that must be accepted before the app continues. Acceptance is stored locally and the notice does not re-appear on subsequent launches.
 
 ## Native Scanner and Nmap Support
 
@@ -52,12 +56,12 @@ NetRecon supports two scanning paths.
 
 The built-in scanner is the default path and is designed for speed. It uses async TCP connections, supports custom port selections, and avoids the common problem of a GUI tool becoming unusable on machines where Nmap is missing.
 
-Default configuration includes:
+Default configuration:
 
 - `native_quick` profile by default
-- `8000` configured native concurrency
-- `1.5s` native timeout
-- configurable memory cap safeguards
+- GUI Speed dropdown with four tiers: **Safe (500)**, **Balanced (1500)** (default), **Fast (4000)**, **Extreme (8000)**. The Extreme tier requires explicit confirmation.
+- `1.5s` connect timeout
+- Configurable memory cap safeguards
 
 ### Nmap Integration
 

@@ -28,9 +28,17 @@ _INITIALIZED = False
 # Redact obvious user-identifying tokens from any line we emit to disk.
 # Targets, payloads, and arguments should never be passed to the logger
 # in the first place, but this is a second line of defence.
+#
+# The IPv6 pattern intentionally requires at least four colon-separated
+# hex groups so it cannot match ordinary log timestamps like ``21:34:56``.
 _REDACT_PATTERNS = [
     (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), "<ip>"),
-    (re.compile(r"\b[A-Fa-f0-9:]{2,}(?::[A-Fa-f0-9]{1,4}){2,}\b"), "<ipv6>"),
+    (
+        re.compile(
+            r"\b(?:[A-Fa-f0-9]{1,4}:){3,7}[A-Fa-f0-9]{1,4}\b|\b::[A-Fa-f0-9:]{2,}\b"
+        ),
+        "<ipv6>",
+    ),
     (re.compile(r"\b[\w\.-]+@[\w\.-]+\.\w+\b"), "<email>"),
 ]
 

@@ -6,6 +6,7 @@ Includes version info, project links, the disclaimer text, and a
 outside of this window.
 """
 
+import sys
 import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox
@@ -23,20 +24,42 @@ ISSUES_URL = "https://github.com/PradaFit/NetRecon/issues"
 # (for example, https://github.com/sponsors/PradaFit). The repo URL is
 # used as a safe placeholder so the button is never broken.
 SUPPORT_URL = "https://github.com/PradaFit/NetRecon"
+# TODO: Replace with the hosted privacy policy URL once published
+# (for example, https://pradafit.github.io/NetRecon/privacy). Falls back
+# to opening the bundled PRIVACY.md locally if the file is present.
+PRIVACY_URL = "https://github.com/PradaFit/NetRecon/blob/main/PRIVACY.md"
+
+
+def _find_bundled(filename: str) -> Path | None:
+    """Locate a bundled doc next to the installed app or in source."""
+    candidates = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / filename)
+    candidates.extend(
+        [
+            Path(__file__).resolve().parent.parent / filename,
+            Path(sys.executable).resolve().parent / filename,
+            Path.cwd() / filename,
+        ]
+    )
+    for c in candidates:
+        try:
+            if c.is_file():
+                return c
+        except OSError:
+            continue
+    return None
 
 
 def _read_disclaimer() -> str:
     """Look up DISCLAIMER.md alongside the installed app."""
-    candidates = [
-        Path(__file__).resolve().parent.parent / "DISCLAIMER.md",
-        Path.cwd() / "DISCLAIMER.md",
-    ]
-    for c in candidates:
+    path = _find_bundled("DISCLAIMER.md")
+    if path:
         try:
-            if c.is_file():
-                return c.read_text(encoding="utf-8")
+            return path.read_text(encoding="utf-8")
         except OSError:
-            continue
+            pass
     return (
         "NetRecon is provided for lawful security testing and authorized "
         "network diagnostics. Use it only on systems you own or have "
@@ -139,6 +162,18 @@ class AboutDialog(ctk.CTkToplevel):
 
         self._link_button(wrap, "GitHub Repository", GITHUB_URL)
         self._link_button(wrap, "Report an Issue", ISSUES_URL)
+        ctk.CTkButton(
+            wrap,
+            text="Privacy Policy",
+            command=self._open_privacy,
+            width=240,
+            height=32,
+            anchor="w",
+            fg_color=COLORS["bg_input"],
+            hover_color=COLORS["bg_card"],
+            text_color=COLORS["text"],
+            font=(FONT_FAMILY, 12),
+        ).pack(anchor="w", pady=4)
         self._link_button(
             wrap,
             "Support Development",
@@ -180,7 +215,7 @@ class AboutDialog(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             wrap,
-            text=f"Log location: ~/.netrecon/logs/netrecon.log",
+            text="Log location: ~/.netrecon/logs/netrecon.log",
             font=(FONT_MONO, 11),
             text_color=COLORS["text_dim"],
         ).pack(anchor="w", pady=(0, 12))
@@ -232,6 +267,16 @@ class AboutDialog(ctk.CTkToplevel):
             webbrowser.open_new_tab(url)
         except Exception:
             messagebox.showerror("NetRecon", f"Could not open browser:\n{url}")
+
+    def _open_privacy(self):
+        local = _find_bundled("PRIVACY.md")
+        if local:
+            try:
+                webbrowser.open_new_tab(local.as_uri())
+                return
+            except Exception:
+                pass
+        self._open_url(PRIVACY_URL)
 
     def _export_log(self):
         path = filedialog.asksaveasfilename(
