@@ -2,6 +2,8 @@
 
 NetRecon is a Python network reconnaissance toolkit built for fast DNS lookups, async TCP port scanning, optional Nmap-driven enumeration, IP geolocation, and exportable scan history. It ships with a desktop GUI and a CLI, runs on Windows, Linux, and macOS, and does not require Nmap for core scanning.
 
+Intended for authorized network diagnostics, DNS verification, internal network checks, and security testing on systems you own or are explicitly permitted to assess.
+
 Developed by PradaFit.
 
 <img width="1280" height="720" alt="NetRecon_Images/NetRecon_Img_2.png" src="https://github.com/PradaFit/NetRecon/blob/main/NetRecon_Images/NetRecon_Img_2.png?raw=true" />
@@ -189,12 +191,16 @@ This does not make reckless scanning safe. It means the application is not casua
 
 ## Practical Use Cases
 
-- DNS troubleshooting
-- fast internal host checks
-- service exposure verification
-- external IP lookups
-- simple recon workflows from a single desktop app
+- DNS troubleshooting and propagation verification
+- internal host inventory on networks you administer
+- service exposure checks before publishing a host
+- public IP and ASN lookups
 - lightweight reporting and export for follow-up work
+- authorized security testing engagements
+
+## Privacy
+
+NetRecon does not include telemetry, analytics, or third-party trackers. Scan results, history, preferences, and diagnostic logs are stored locally under `%USERPROFILE%\.netrecon` on Windows or `~/.netrecon` elsewhere. Geolocation lookups are sent to public IP lookup APIs only when you run one, and only contain the IP you provided.
 
 ## Legal and Responsible Use
 

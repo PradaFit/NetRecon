@@ -186,7 +186,7 @@ class ScanEngine:
             )
 
         scanner = AsyncPortScanner(
-            concurrency=concurrency or 8000,
+            concurrency=concurrency or 1500,
             connect_timeout=timeout or 1.5,
             grab_banners=grab_banners,
         )

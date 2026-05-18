@@ -2,7 +2,7 @@
 
 import re
 import threading
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from .theme import COLORS, FONT_FAMILY
@@ -14,6 +14,18 @@ from .widgets import (
 )
 from netrecon import ScanEngine, ExportEngine, SCAN_PROFILES
 from netrecon.platform_utils import platform_info
+
+
+# GUI-side speed tiers. Maps a friendly label to the native scanner's
+# concurrency setting. The default is intentionally moderate; the
+# engine still supports higher values for users who explicitly opt in.
+SPEED_TIERS = {
+    "Safe (500)": 500,
+    "Balanced (1500)": 1500,
+    "Fast (4000)": 4000,
+    "Extreme (8000)": 8000,
+}
+DEFAULT_SPEED = "Balanced (1500)"
 
 
 class ScanTab(ctk.CTkFrame):
@@ -86,6 +98,15 @@ class ScanTab(ctk.CTkFrame):
             row1, "Timing (nmap)", timing_values, default="T3", width=100
         )
         self.timing.pack(side="left", padx=(0, 8))
+
+        self.speed = LabeledDropdown(
+            row1,
+            "Speed (native)",
+            list(SPEED_TIERS.keys()),
+            default=DEFAULT_SPEED,
+            width=150,
+        )
+        self.speed.pack(side="left", padx=(0, 8))
 
         # inputs row 2
         row2 = ctk.CTkFrame(self, fg_color="transparent")
@@ -191,6 +212,24 @@ class ScanTab(ctk.CTkFrame):
         if not target:
             return
 
+        custom = self.custom_args.get()
+        profile_key = self._get_selected_profile_key()
+        ports = self.ports.get() or None
+        is_native = profile_key.startswith("native_")
+
+        speed_label = self.speed.get()
+        concurrency = SPEED_TIERS.get(speed_label, SPEED_TIERS[DEFAULT_SPEED])
+
+        if is_native and concurrency >= SPEED_TIERS["Extreme (8000)"]:
+            if not messagebox.askyesno(
+                "NetRecon: Confirm Extreme Speed",
+                "Extreme speed opens a very large number of concurrent sockets. "
+                "Only use this on networks you own or are authorized to scan, and "
+                "only when you understand the load it can place on intermediate "
+                "devices.\n\nContinue with Extreme speed?",
+            ):
+                return
+
         self._scanning = True
         self.scan_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
@@ -199,11 +238,6 @@ class ScanTab(ctk.CTkFrame):
         self.progress.start()
         self.console.clear()
         self._set_status("Scanning ...", "info")
-
-        custom = self.custom_args.get()
-        profile_key = self._get_selected_profile_key()
-        ports = self.ports.get() or None
-        is_native = profile_key.startswith("native_")
 
         if not is_native and not custom:
             timing = self.timing.get()
@@ -219,8 +253,18 @@ class ScanTab(ctk.CTkFrame):
         def task():
             try:
                 if is_native:
-                    result = self.engine.scan(
-                        target, profile=profile_key, ports=ports, callback=callback
+                    if profile_key == "native_full":
+                        port_list = list(range(1, 65536))
+                        port_spec = None
+                    else:
+                        port_list = None
+                        port_spec = ports
+                    result = self.engine.native_scan(
+                        target,
+                        ports=port_list,
+                        port_spec=port_spec,
+                        concurrency=concurrency,
+                        callback=callback,
                     )
                 elif custom:
                     result = self.engine.scan(

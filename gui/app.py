@@ -9,7 +9,10 @@ from .dns_tab import DNSTab
 from .scan_tab import ScanTab
 from .geo_tab import GeoTab
 from .history_tab import HistoryTab
+from .first_run import prompt_if_needed
+from .about_dialog import AboutDialog
 from netrecon import DatabaseManager, __version__
+from netrecon import logger as nr_logger
 from netrecon.platform_utils import platform_info
 
 
@@ -94,6 +97,21 @@ class PradaFitApp(ctk.CTk):
             text_color=COLORS["success"],
         ).pack(anchor="e")
 
+        ctk.CTkButton(
+            info_frame,
+            text="About",
+            command=self._open_about,
+            width=80,
+            height=24,
+            corner_radius=6,
+            font=(FONT_FAMILY, 11),
+            fg_color=COLORS["bg_input"],
+            hover_color=COLORS["accent_dim"],
+            text_color=COLORS["text"],
+            border_width=1,
+            border_color=COLORS["border"],
+        ).pack(anchor="e", pady=(4, 0))
+
         # status bar (bottom) 
         self.status_bar = StatusBar(self)
         self.status_bar.pack(side="bottom", fill="x")
@@ -133,8 +151,21 @@ class PradaFitApp(ctk.CTk):
 
         self.tabview.set("  DNS Lookup  ")
 
+    def _open_about(self):
+        AboutDialog(self)
+
 
 def launch_gui():
     """Fire up the GUI."""
+    log = nr_logger.get_logger("gui")
+    log.info("NetRecon GUI starting (v%s)", __version__)
     app = PradaFitApp()
+    # Hide the main window until the user accepts the responsible-use notice.
+    app.withdraw()
+    app.update_idletasks()
+    if not prompt_if_needed(app):
+        log.info("User declined responsible-use notice; exiting")
+        app.destroy()
+        return
+    app.deiconify()
     app.mainloop()

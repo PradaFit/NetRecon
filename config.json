@@ -9,7 +9,7 @@
     "scan": {
         "default_profile": "native_quick",
         "default_timing": "T3",
-        "native_concurrency": 8000,
+        "native_concurrency": 1500,
         "native_timeout": 1.5,
         "memory_cap_mb": 14000
     },
