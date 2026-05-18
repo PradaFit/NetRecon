@@ -15,6 +15,7 @@ import dns.zone
 import dns.query
 import dns.rdatatype
 import dns.exception
+import dns.xfr  # required for dns.xfr.TransferError; not transitively guaranteed
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
