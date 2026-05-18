@@ -159,13 +159,18 @@ def launch_gui():
     """Fire up the GUI."""
     log = nr_logger.get_logger("gui")
     log.info("NetRecon GUI starting (v%s)", __version__)
-    app = PradaFitApp()
-    # Hide the main window until the user accepts the responsible-use notice.
-    app.withdraw()
-    app.update_idletasks()
-    if not prompt_if_needed(app):
-        log.info("User declined responsible-use notice; exiting")
-        app.destroy()
-        return
-    app.deiconify()
-    app.mainloop()
+    try:
+        app = PradaFitApp()
+        # Render the main window once so Tk has a stable primary window
+        # before any modal grabs focus. Without this, destroying a modal
+        # CTkToplevel over a withdrawn root can tear down the interpreter
+        # on Windows and the app silently exits.
+        app.update_idletasks()
+        if not prompt_if_needed(app):
+            log.info("User declined responsible-use notice; exiting")
+            app.destroy()
+            return
+        app.mainloop()
+    except Exception:
+        log.exception("NetRecon GUI crashed during startup")
+        raise

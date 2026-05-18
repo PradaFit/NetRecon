@@ -83,8 +83,6 @@ Free
 
 ## Privacy policy URL
 
-TODO: Replace with the final hosted URL before submission. Until then,
-the canonical policy lives in the repository:
 https://github.com/PradaFit/NetRecon/blob/main/PRIVACY.md
 
 ## Support URL

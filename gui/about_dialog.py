@@ -20,13 +20,7 @@ from .theme import COLORS, FONT_FAMILY, FONT_MONO
 
 GITHUB_URL = "https://github.com/PradaFit/NetRecon"
 ISSUES_URL = "https://github.com/PradaFit/NetRecon/issues"
-# TODO: Replace with a dedicated sponsor or donation URL when available
-# (for example, https://github.com/sponsors/PradaFit). The repo URL is
-# used as a safe placeholder so the button is never broken.
 SUPPORT_URL = "https://github.com/PradaFit/NetRecon"
-# TODO: Replace with the hosted privacy policy URL once published
-# (for example, https://pradafit.github.io/NetRecon/privacy). Falls back
-# to opening the bundled PRIVACY.md locally if the file is present.
 PRIVACY_URL = "https://github.com/PradaFit/NetRecon/blob/main/PRIVACY.md"
 
 
