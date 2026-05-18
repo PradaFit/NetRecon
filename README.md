@@ -14,7 +14,7 @@ The biggest difference is the built-in native scanner. If Nmap is installed, Net
 
 ## Core Features
 
-- Native async TCP scanner with high concurrency and no external scanner requirement
+- Native async TCP scanner with high concurrency, non-blocking DNS resolution, and no external scanner requirement
 - Optional Nmap integration for users who want classic service and OS detection workflows
 - DNS toolkit with support for `A`, `AAAA`, `MX`, `NS`, `TXT`, `SOA`, `CNAME`, `PTR`, `SRV`, and `CAA`
 - DNS propagation checks across public resolvers
@@ -22,9 +22,11 @@ The biggest difference is the built-in native scanner. If Nmap is installed, Net
 - IP geolocation with provider failover
 - Desktop GUI built with `customtkinter`
 - CLI mode for fast terminal-driven recon
-- Scan history stored in SQLite with export support
+- Scan history stored in SQLite with safe connection lifecycle and `VACUUM` cleanup
 - Export output to JSON, CSV, styled HTML, and interactive map/report formats where applicable
+- Hardened input validation, sandboxed export paths, and parameterized database queries
 - Cross-platform operation on Windows, Linux, and macOS
+- Windows installer (Inno Setup) for Windows 10 / 11
 
 ## Interface Overview
 
@@ -92,26 +94,32 @@ This is useful if you want one tool for both collection and handoff.
 
 ## Quick Start
 
-### 1. Clone the repository
+### Option A: Windows Installer
+
+Download the latest `NetRecon-Setup-*.exe` from the Releases page (or install from the Microsoft Store) and run it. The installer supports Windows 10 (1809+) and Windows 11 on x64 and ARM64, creates Start Menu and optional desktop shortcuts, and preserves user data under `%USERPROFILE%\.netrecon` across upgrades and uninstalls.
+
+### Option B: From Source
+
+#### 1. Clone the repository
 
 ```bash
 git clone https://github.com/PradaFit/NetRecon.git
 cd NetRecon
 ```
 
-### 2. Install dependencies
+#### 2. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Launch the GUI
+#### 3. Launch the GUI
 
 ```bash
 python main.py
 ```
 
-### 4. Launch the CLI
+#### 4. Launch the CLI
 
 ```bash
 python main.py --cli
@@ -157,11 +165,12 @@ python main.py geo --myip
 
 NetRecon includes input validation and defensive handling in the core engines.
 
-- target and port input sanitization
-- blocked dangerous shell-style input patterns
-- restricted export paths
-- parameterized SQLite queries
+- target and port input sanitization with strict IPv4, IPv6, CIDR, and hostname rules
+- Nmap argument allowlist that blocks file-include, output redirection, custom data dirs, and resume flags (`-iL`, `-iR`, `--datadir`, `--servicedb`, `--versiondb`, `-oN/-oX/-oG/-oA`, `--resume`, `--script-args`)
+- export paths sandboxed to home, temp, and working directory roots using real-path containment checks
+- SQLite connections wrapped with `contextlib.closing` and parameterized queries throughout
 - HTML escaping in report generation
+- coordinate coercion on geo map output to prevent injection into rendered Folium popups
 
 This does not make reckless scanning safe. It means the application is not casually trusting user input.
 
