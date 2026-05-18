@@ -1,7 +1,7 @@
 """Geolocation tab"""
 
 import threading
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from .theme import COLORS, FONT_FAMILY
@@ -12,6 +12,9 @@ from .widgets import (
 )
 from netrecon import GeoEngine, ExportEngine
 from netrecon.platform_utils import platform_info
+from netrecon import logger as nr_logger
+
+log = nr_logger.get_logger("gui.geo")
 
 
 class GeoTab(ctk.CTkFrame):
@@ -124,7 +127,22 @@ class GeoTab(ctk.CTkFrame):
         target = self.target.get()
         if not target:
             return
-        self._set_status(f"Running traceroute to {target} (this may take a while) ...")
+
+        # One-shot heads-up so the user knows why the button looks idle.
+        # Skipped on subsequent runs in the same session.
+        if not getattr(self, "_tracert_warned", False):
+            messagebox.showinfo(
+                "Traceroute",
+                "Traceroute walks every router between you and the target,\n"
+                "one hop at a time, then geolocates each hop.\n\n"
+                "Expect roughly 5 to 20 seconds depending on the path length\n"
+                "and how quickly each router replies. Slow or silent hops\n"
+                "add to the total. The GUI stays responsive while it runs.",
+                parent=self,
+            )
+            self._tracert_warned = True
+
+        self._set_status(f"Running traceroute to {target} (5-20s typical) ...")
 
         def task():
             results = self.engine.traceroute_geo(target)
@@ -319,52 +337,90 @@ class GeoTab(ctk.CTkFrame):
 
     # exports
 
-    def _export_json(self):
+    def _do_export(self, fn, ext, kind, **kwargs):
         if not self._last_results:
+            messagebox.showinfo(
+                "NetRecon",
+                "Nothing to export. Run a lookup first.",
+                parent=self,
+            )
             return
         path = filedialog.asksaveasfilename(
-            defaultextension=".json", filetypes=[("JSON", "*.json")]
+            parent=self,
+            defaultextension=f".{ext}",
+            filetypes=[(kind, f"*.{ext}")],
+            initialfile=f"netrecon_geo.{ext}",
         )
-        if path:
-            ExportEngine.to_json(self._last_results, path)
-            self._set_status(f"Exported to {path}", "success")
+        if not path:
+            return
+        try:
+            out = fn(self._last_results, path, trusted=True, **kwargs)
+        except Exception as e:
+            log.exception("Geo export failed (%s)", ext)
+            messagebox.showerror(
+                "Export failed",
+                f"Could not export to {path}\n\n{type(e).__name__}: {e}",
+                parent=self,
+            )
+            self._set_status("Export failed", "error")
+            return
+        if not out:
+            messagebox.showwarning(
+                "Export",
+                "Nothing to write (no rows). Try a different format.",
+                parent=self,
+            )
+            return
+        self._set_status(f"Exported to {out}", "success")
+        messagebox.showinfo("Export complete", f"Saved to:\n{out}", parent=self)
+
+    def _export_json(self):
+        self._do_export(ExportEngine.to_json, "json", "JSON")
 
     def _export_csv(self):
-        if not self._last_results:
-            return
-        path = filedialog.asksaveasfilename(
-            defaultextension=".csv", filetypes=[("CSV", "*.csv")]
-        )
-        if path:
-            ExportEngine.to_csv(self._last_results, path)
-            self._set_status(f"Exported to {path}", "success")
+        self._do_export(ExportEngine.to_csv, "csv", "CSV")
 
     def _export_html(self):
-        if not self._last_results:
-            return
-        path = filedialog.asksaveasfilename(
-            defaultextension=".html", filetypes=[("HTML", "*.html")]
+        self._do_export(
+            ExportEngine.to_html, "html", "HTML", title="Geolocation Report"
         )
-        if path:
-            ExportEngine.to_html(self._last_results, path, title="Geolocation Report")
-            self._set_status(f"Exported to {path}", "success")
 
     def _export_map(self):
         if not self._geo_list:
+            messagebox.showinfo(
+                "NetRecon",
+                "No geolocation results to map. Run a lookup first.",
+                parent=self,
+            )
             return
         path = filedialog.asksaveasfilename(
+            parent=self,
             defaultextension=".html",
             filetypes=[("HTML Map", "*.html")],
             initialfile="netrecon_map.html",
         )
         if not path:
             return
-
-        result = ExportEngine.generate_map(self._geo_list, path)
+        try:
+            result = ExportEngine.generate_map(self._geo_list, path, trusted=True)
+        except Exception as e:
+            log.exception("Map export failed")
+            messagebox.showerror(
+                "Map export failed",
+                f"Could not write map to {path}\n\n{type(e).__name__}: {e}",
+                parent=self,
+            )
+            self._set_status("Map export failed", "error")
+            return
         if result:
             self._set_status(f"Map saved to {path}", "success")
             platform_info.open_file(path)
         else:
+            messagebox.showwarning(
+                "Map export",
+                "Failed to generate map. The 'folium' package is not installed.",
+                parent=self,
+            )
             self._set_status(
                 "Failed to generate map (folium may not be installed)", "error"
             )
@@ -391,4 +447,4 @@ class GeoTab(ctk.CTkFrame):
             try:
                 self.db.save(scan_type, target, data)
             except Exception:
-                pass
+                log.exception("Failed to save %s to history", scan_type)

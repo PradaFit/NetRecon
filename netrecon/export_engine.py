@@ -22,19 +22,23 @@ def _is_within(child, parent):
         return False
 
 
-def _safe_path(filepath):
+def _safe_path(filepath, trusted=False):
     """
     Normalize a file path, create parent dirs, and return a Path object.
-    Rejects anything that escapes the user home, system temp, or cwd.
+    By default, rejects anything that escapes the user home, system temp,
+    or cwd. Pass trusted=True when the path was chosen by the user via
+    an interactive save dialog (the user has already authorized the
+    location, so the allowlist would only get in the way).
     """
     p = Path(filepath).resolve()
-    allowed_roots = [
-        Path.home().resolve(),
-        Path(tempfile.gettempdir()).resolve(),
-        Path.cwd().resolve(),
-    ]
-    if not any(_is_within(p, root) for root in allowed_roots):
-        raise ValueError(f"Refusing to write to {p} (outside workspace/home/temp)")
+    if not trusted:
+        allowed_roots = [
+            Path.home().resolve(),
+            Path(tempfile.gettempdir()).resolve(),
+            Path.cwd().resolve(),
+        ]
+        if not any(_is_within(p, root) for root in allowed_roots):
+            raise ValueError(f"Refusing to write to {p} (outside workspace/home/temp)")
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -42,16 +46,16 @@ def _safe_path(filepath):
 class ExportEngine:
 
     @staticmethod
-    def to_json(data, filepath):
-        p = _safe_path(filepath)
+    def to_json(data, filepath, trusted=False):
+        p = _safe_path(filepath, trusted=trusted)
         payload = ExportEngine._normalize(data)
         with open(p, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2, default=str)
         return str(p)
 
     @staticmethod
-    def to_csv(data, filepath):
-        p = _safe_path(filepath)
+    def to_csv(data, filepath, trusted=False):
+        p = _safe_path(filepath, trusted=trusted)
         payload = ExportEngine._normalize(data)
         rows = ExportEngine._flatten_for_csv(payload)
         if not rows:
@@ -63,8 +67,8 @@ class ExportEngine:
         return str(p)
 
     @staticmethod
-    def to_html(data, filepath, title="PradaFit Report"):
-        p = _safe_path(filepath)
+    def to_html(data, filepath, title="PradaFit Report", trusted=False):
+        p = _safe_path(filepath, trusted=trusted)
         payload = ExportEngine._normalize(data)
         content = ExportEngine._build_html(payload, title)
         with open(p, "w", encoding="utf-8") as fh:
@@ -72,14 +76,14 @@ class ExportEngine:
         return str(p)
 
     @staticmethod
-    def generate_map(geo_results, filepath, title="PradaFit Geolocation Map"):
+    def generate_map(geo_results, filepath, title="PradaFit Geolocation Map", trusted=False):
         try:
             import folium
             from folium.plugins import MarkerCluster
         except ImportError:
             return None
 
-        p = _safe_path(filepath)
+        p = _safe_path(filepath, trusted=trusted)
 
         locations = []
         for item in geo_results:

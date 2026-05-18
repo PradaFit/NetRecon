@@ -265,11 +265,62 @@ class DNSEngine:
                                 "value": str(rdata),
                             }
                         )
-            return {"success": True, "records": records, "total": len(records)}
+            return {
+                "success": True,
+                "records": records,
+                "total": len(records),
+                "nameserver": nameserver,
+            }
         except dns.xfr.TransferError:
-            return {"success": False, "error": "Zone transfer refused by server"}
+            return {
+                "success": False,
+                "error": (
+                    f"Zone transfer refused by {nameserver} (this is expected; "
+                    "AXFR is disabled on virtually every public DNS server)."
+                ),
+            }
+        except dns.exception.FormError:
+            return {
+                "success": False,
+                "error": (
+                    f"{nameserver} closed the AXFR stream without sending zone data. "
+                    "The server refused the transfer (normal, non-issue)."
+                ),
+            }
+        except (dns.exception.Timeout, socket.timeout):
+            return {
+                "success": False,
+                "error": (
+                    f"Timed out contacting {nameserver} on TCP/53. "
+                    "The server may not accept AXFR connections."
+                ),
+            }
+        except ConnectionRefusedError:
+            return {
+                "success": False,
+                "error": f"{nameserver} refused the TCP/53 connection.",
+            }
+        except ValueError as exc:
+            # dnspython raises bare ValueError both when the AXFR stream
+            # is truncated (server refused mid-transfer) and when the
+            # zone contains record types it cannot parse (HTTPS, SVCB,
+            # custom types). Either way it is not a NetRecon bug.
+            detail = str(exc).strip() or "stream closed or unsupported record"
+            return {
+                "success": False,
+                "error": (
+                    f"{nameserver} did not return a complete, parseable zone "
+                    f"({detail}). The server most likely refused AXFR, "
+                    "or the zone contains modern record types this client "
+                    "does not decode. This is expected on public DNS servers."
+                ),
+            }
         except Exception as exc:
-            return {"success": False, "error": f"Zone transfer failed: {exc}"}
+            msg = str(exc).strip() or type(exc).__name__
+            return {
+                "success": False,
+                "error": f"Zone transfer to {nameserver} failed: {msg}",
+            }
 
     # WHOIS
 

@@ -8,6 +8,9 @@ import customtkinter as ctk
 from .theme import COLORS, FONT_FAMILY, FONT_MONO
 from .widgets import OutputConsole
 from netrecon import DatabaseManager, ExportEngine
+from netrecon import logger as nr_logger
+
+log = nr_logger.get_logger("gui.history")
 
 
 class HistoryTab(ctk.CTkFrame):
@@ -257,15 +260,33 @@ class HistoryTab(ctk.CTkFrame):
     def _export_all(self):
         records = self.db.get_history(limit=10000)
         if not records:
+            messagebox.showinfo(
+                "NetRecon",
+                "History is empty. Nothing to export.",
+                parent=self,
+            )
             return
         path = filedialog.asksaveasfilename(
+            parent=self,
             defaultextension=".json",
             filetypes=[("JSON", "*.json")],
             initialfile="netrecon_history.json",
         )
-        if path:
-            ExportEngine.to_json(records, path)
-            self._set_status(f"History exported to {path}", "success")
+        if not path:
+            return
+        try:
+            out = ExportEngine.to_json(records, path, trusted=True)
+        except Exception as e:
+            log.exception("History export failed")
+            messagebox.showerror(
+                "Export failed",
+                f"Could not export history to {path}\n\n{type(e).__name__}: {e}",
+                parent=self,
+            )
+            self._set_status("Export failed", "error")
+            return
+        self._set_status(f"History exported to {out}", "success")
+        messagebox.showinfo("Export complete", f"Saved to:\n{out}", parent=self)
 
     def _set_status(self, msg, level="info"):
         if self.status:

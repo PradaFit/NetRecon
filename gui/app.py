@@ -129,6 +129,7 @@ class PradaFitApp(ctk.CTk):
             segmented_button_unselected_hover_color=COLORS["bg_input"],
             text_color=COLORS["text"],
             corner_radius=8,
+            command=self._on_tab_change,
         )
         self.tabview.pack(fill="both", expand=True, padx=8, pady=(4, 4))
 
@@ -153,6 +154,17 @@ class PradaFitApp(ctk.CTk):
 
     def _open_about(self):
         AboutDialog(self)
+
+    def _on_tab_change(self):
+        try:
+            name = self.tabview.get()
+        except Exception:
+            return
+        if name.strip() == "History":
+            try:
+                self.hist_tab._refresh()
+            except Exception:
+                pass
 
 
 def launch_gui():

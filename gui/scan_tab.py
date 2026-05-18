@@ -14,6 +14,9 @@ from .widgets import (
 )
 from netrecon import ScanEngine, ExportEngine, SCAN_PROFILES
 from netrecon.platform_utils import platform_info
+from netrecon import logger as nr_logger
+
+log = nr_logger.get_logger("gui.scan")
 
 
 # GUI-side speed tiers. Maps a friendly label to the native scanner's
@@ -325,7 +328,8 @@ class ScanTab(ctk.CTkFrame):
                 )
                 self.db.save("Port Scan", result.target, result, summary)
             except Exception:
-                pass
+                log.exception("Failed to save scan to history")
+                self._set_status("Scan finished but could not save to history", "warning")
 
     def _display_result(self, result):
         self.console.append_line("")
@@ -380,35 +384,53 @@ class ScanTab(ctk.CTkFrame):
 
     # exports
 
-    def _export_json(self):
+    def _do_export(self, fn, ext, kind, **kwargs):
         if not self._last_result:
+            messagebox.showinfo(
+                "NetRecon",
+                "Nothing to export. Run a scan first.",
+                parent=self,
+            )
             return
         path = filedialog.asksaveasfilename(
-            defaultextension=".json", filetypes=[("JSON", "*.json")]
+            parent=self,
+            defaultextension=f".{ext}",
+            filetypes=[(kind, f"*.{ext}")],
+            initialfile=f"netrecon_scan.{ext}",
         )
-        if path:
-            ExportEngine.to_json(self._last_result, path)
-            self._set_status(f"Exported to {path}", "success")
+        if not path:
+            return
+        try:
+            out = fn(self._last_result, path, trusted=True, **kwargs)
+        except Exception as e:
+            log.exception("Export failed (%s)", ext)
+            messagebox.showerror(
+                "Export failed",
+                f"Could not export to {path}\n\n{type(e).__name__}: {e}",
+                parent=self,
+            )
+            self._set_status("Export failed", "error")
+            return
+        if not out:
+            messagebox.showwarning(
+                "Export",
+                "Nothing to write (no rows). Try a different format.",
+                parent=self,
+            )
+            return
+        self._set_status(f"Exported to {out}", "success")
+        messagebox.showinfo("Export complete", f"Saved to:\n{out}", parent=self)
+
+    def _export_json(self):
+        self._do_export(ExportEngine.to_json, "json", "JSON")
 
     def _export_csv(self):
-        if not self._last_result:
-            return
-        path = filedialog.asksaveasfilename(
-            defaultextension=".csv", filetypes=[("CSV", "*.csv")]
-        )
-        if path:
-            ExportEngine.to_csv(self._last_result, path)
-            self._set_status(f"Exported to {path}", "success")
+        self._do_export(ExportEngine.to_csv, "csv", "CSV")
 
     def _export_html(self):
-        if not self._last_result:
-            return
-        path = filedialog.asksaveasfilename(
-            defaultextension=".html", filetypes=[("HTML", "*.html")]
+        self._do_export(
+            ExportEngine.to_html, "html", "HTML", title="Port Scan Report"
         )
-        if path:
-            ExportEngine.to_html(self._last_result, path, title="Port Scan Report")
-            self._set_status(f"Exported to {path}", "success")
 
     def _copy(self):
         text = self.console.get_text()

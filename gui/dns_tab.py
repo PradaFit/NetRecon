@@ -2,7 +2,7 @@
 
 import threading
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from .theme import COLORS, FONT_FAMILY
@@ -13,6 +13,9 @@ from .widgets import (
     LabeledDropdown,
 )
 from netrecon import DNSEngine, ExportEngine, RECORD_TYPES
+from netrecon import logger as nr_logger
+
+log = nr_logger.get_logger("gui.dns")
 
 
 class DNSTab(ctk.CTkFrame):
@@ -270,11 +273,33 @@ class DNSTab(ctk.CTkFrame):
 
         if data.get("error"):
             self.console.append_line(f"  {data['error']}", "warning")
+            self.console.append_line("")
+            self.console.append_line(
+                "  Note: AXFR (DNS zone transfer) is intentionally disabled on",
+                "dim",
+            )
+            self.console.append_line(
+                "  virtually all production name servers. Getting refused here is",
+                "dim",
+            )
+            self.console.append_line(
+                "  the expected, secure outcome -- not a tool failure. Open AXFR",
+                "dim",
+            )
+            self.console.append_line(
+                "  is itself a misconfiguration finding worth reporting if you see one.",
+                "dim",
+            )
             return
 
         self.console.append_line(
             f"  Transfer successful! {data.get('total', 0)} records found.", "success"
         )
+        if data.get("nameserver"):
+            self.console.append_line(
+                f"  Server: {data['nameserver']} (this is a misconfiguration finding)",
+                "warning",
+            )
         self.console.append_line("")
         for rec in data.get("records", []):
             self.console.append_line(
@@ -282,35 +307,51 @@ class DNSTab(ctk.CTkFrame):
             )
 
 
-    def _export_json(self):
+    def _do_export(self, fn, ext, kind, **kwargs):
         if not self._last_results:
+            messagebox.showinfo(
+                "NetRecon",
+                "Nothing to export. Run a lookup first.",
+                parent=self,
+            )
             return
         path = filedialog.asksaveasfilename(
-            defaultextension=".json", filetypes=[("JSON", "*.json")]
+            parent=self,
+            defaultextension=f".{ext}",
+            filetypes=[(kind, f"*.{ext}")],
+            initialfile=f"netrecon_dns.{ext}",
         )
-        if path:
-            ExportEngine.to_json(self._last_results, path)
-            self._set_status(f"Exported to {path}", "success")
+        if not path:
+            return
+        try:
+            out = fn(self._last_results, path, trusted=True, **kwargs)
+        except Exception as e:
+            log.exception("DNS export failed (%s)", ext)
+            messagebox.showerror(
+                "Export failed",
+                f"Could not export to {path}\n\n{type(e).__name__}: {e}",
+                parent=self,
+            )
+            self._set_status("Export failed", "error")
+            return
+        if not out:
+            messagebox.showwarning(
+                "Export",
+                "Nothing to write (no rows). Try a different format.",
+                parent=self,
+            )
+            return
+        self._set_status(f"Exported to {out}", "success")
+        messagebox.showinfo("Export complete", f"Saved to:\n{out}", parent=self)
+
+    def _export_json(self):
+        self._do_export(ExportEngine.to_json, "json", "JSON")
 
     def _export_csv(self):
-        if not self._last_results:
-            return
-        path = filedialog.asksaveasfilename(
-            defaultextension=".csv", filetypes=[("CSV", "*.csv")]
-        )
-        if path:
-            ExportEngine.to_csv(self._last_results, path)
-            self._set_status(f"Exported to {path}", "success")
+        self._do_export(ExportEngine.to_csv, "csv", "CSV")
 
     def _export_html(self):
-        if not self._last_results:
-            return
-        path = filedialog.asksaveasfilename(
-            defaultextension=".html", filetypes=[("HTML", "*.html")]
-        )
-        if path:
-            ExportEngine.to_html(self._last_results, path, title="DNS Report")
-            self._set_status(f"Exported to {path}", "success")
+        self._do_export(ExportEngine.to_html, "html", "HTML", title="DNS Report")
 
     def _copy(self):
         text = self.console.get_text()
@@ -334,4 +375,4 @@ class DNSTab(ctk.CTkFrame):
             try:
                 self.db.save(scan_type, target, data)
             except Exception:
-                pass
+                log.exception("Failed to save %s to history", scan_type)

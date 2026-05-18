@@ -111,12 +111,21 @@ class GeoEngine:
             return [GeoResult(ip=target, error="Cannot resolve target")]
 
         if platform_info.is_windows:
-            cmd = ["tracert", "-d", "-w", "2000", "-h", "30", ip]
+            # -d  : no reverse DNS (saves seconds per hop)
+            # -w  : 500 ms per-hop timeout (default is 4000)
+            # -h  : cap at 20 hops (public targets are almost never deeper)
+            cmd = ["tracert", "-d", "-w", "500", "-h", "20", ip]
+            run_timeout = 45
         else:
-            cmd = ["traceroute", "-n", "-w", "2", "-m", "30", ip]
+            # -n : no reverse DNS
+            # -w : 1 s wait per probe
+            # -q 1 : only one probe per hop (default is 3)
+            # -m 20 : cap at 20 hops
+            cmd = ["traceroute", "-n", "-w", "1", "-q", "1", "-m", "20", ip]
+            run_timeout = 30
 
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=run_timeout)
             raw = proc.stdout
         except subprocess.TimeoutExpired:
             return [GeoResult(ip=ip, error="Traceroute timed out")]
