@@ -24,3 +24,7 @@ main4/
 # Packaging / installer (kept local, not published to repo)
 packaging/
 
+# Internal release/store prep docs (kept local, not published to repo)
+RELEASE_CHECKLIST.md
+STORE_LISTING_DRAFT.md
+
