@@ -1,5 +1,7 @@
 # NetRecon
 
+> **Now on the Microsoft Store:** [NetRecon Network Toolkit](https://apps.microsoft.com/store/detail/9N0FM1DQSB34?cid=DevShareMCLPCS) - one-click install, automatic updates, no command line required.
+
 NetRecon is a Python network reconnaissance toolkit built for fast DNS lookups, async TCP port scanning, optional Nmap-driven enumeration, IP geolocation, and exportable scan history. It ships with a desktop GUI and a CLI, runs on Windows, Linux, and macOS, and does not require Nmap for core scanning.
 
 Intended for authorized network diagnostics, DNS verification, internal network checks, and security testing on systems you own or are explicitly permitted to assess.
@@ -7,6 +9,23 @@ Intended for authorized network diagnostics, DNS verification, internal network 
 Developed by PradaFit.
 
 <img width="1280" height="720" alt="NetRecon_Images/NetRecon_Img_2.png" src="https://github.com/PradaFit/NetRecon/blob/main/NetRecon_Images/NetRecon_Img_2.png?raw=true" />
+
+## Available on Microsoft Store
+
+**NetRecon Network Toolkit** is the official Microsoft Store edition of NetRecon, published by PradaFitDev.
+
+- Store listing: https://apps.microsoft.com/store/detail/9N0FM1DQSB34?cid=DevShareMCLPCS
+- One-click install on Windows 10 (1809+) and Windows 11, x64 and ARM64
+- Automatic updates through the Microsoft Store
+- Signed and certified by Microsoft, runs inside the standard MSIX app container
+
+The GitHub releases page continues to host the standalone Inno Setup installer (`NetRecon-Setup-*.exe`) and the source distribution for users who prefer manual install, portable use, or building from source. Both editions share the same engine, feature set, and local-first design.
+
+| Edition | Distribution | Updates | Best for |
+| --- | --- | --- | --- |
+| Microsoft Store | MSIX package | Automatic via Store | Most Windows users |
+| GitHub release | Inno Setup `.exe` | Manual download | Offline / portable / custom installs |
+| Source | `git clone` + `pip` | `git pull` | Linux, macOS, dev work |
 
 ## Why NetRecon
 
