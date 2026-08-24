@@ -12,6 +12,7 @@ import customtkinter as ctk
 from netrecon import preferences, __version__
 from netrecon import logger as nr_logger
 from .theme import COLORS, FONT_FAMILY
+from .windowing import apply_window_icon
 
 
 log = nr_logger.get_logger("gui.first_run")
@@ -43,6 +44,7 @@ class ResponsibleUseDialog(ctk.CTkToplevel):
         self._accepted = False
 
         self.title("NetRecon: Responsible Use")
+        self._window_icon_path = apply_window_icon(self)
         self.geometry("560x360")
         self.minsize(520, 340)
         self.configure(fg_color=COLORS["bg_dark"])

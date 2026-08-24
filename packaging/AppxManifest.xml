@@ -6,7 +6,7 @@
   product "NetRecon Network Toolkit" (Store ID 9N0FM1DQSB34):
     - Name      : PradaFitDev.NetReconNetworkToolkit
     - Publisher : CN=1D29643A-77A6-4A78-A031-6FA471D09DBD
-    - Version   : 2.0.4.0 (4-part; increase for each Store submission)
+    - Version   : 2.0.5.0 (4-part; increase for each Store submission)
     - PFN       : PradaFitDev.NetReconNetworkToolkit_rzswd1j8gdsny
 
   Do NOT sign the package built from this manifest with the local dev
@@ -26,7 +26,7 @@
   <Identity
     Name="PradaFitDev.NetReconNetworkToolkit"
     Publisher="CN=1D29643A-77A6-4A78-A031-6FA471D09DBD"
-    Version="2.0.4.0"
+    Version="2.0.5.0"
     ProcessorArchitecture="x64" />
 
   <Properties>

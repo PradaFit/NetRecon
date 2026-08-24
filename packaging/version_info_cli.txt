@@ -5,8 +5,8 @@
 #
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(2, 0, 4, 0),
-    prodvers=(2, 0, 4, 0),
+    filevers=(2, 0, 5, 0),
+    prodvers=(2, 0, 5, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -22,12 +22,12 @@ VSVersionInfo(
           [
             StringStruct(u'CompanyName', u'PradaFit'),
             StringStruct(u'FileDescription', u'NetRecon Command-Line Interface'),
-            StringStruct(u'FileVersion', u'2.0.4.0'),
+            StringStruct(u'FileVersion', u'2.0.5.0'),
             StringStruct(u'InternalName', u'NetRecon-CLI'),
             StringStruct(u'LegalCopyright', u'Copyright (C) 2026 PradaFit. GPLv3.'),
             StringStruct(u'OriginalFilename', u'NetRecon-CLI.exe'),
             StringStruct(u'ProductName', u'NetRecon Network Toolkit'),
-            StringStruct(u'ProductVersion', u'2.0.4.0'),
+            StringStruct(u'ProductVersion', u'2.0.5.0'),
           ]
         )
       ]

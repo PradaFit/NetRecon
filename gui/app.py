@@ -5,13 +5,16 @@ import customtkinter as ctk
 
 from .theme import COLORS, FONT_FAMILY, FONT_MONO
 from .widgets import StatusBar
-from .dns_tab import DNSTab
-from .scan_tab import ScanTab
-from .geo_tab import GeoTab
-from .history_tab import HistoryTab
 from .first_run import prompt_if_needed
 from .about_dialog import AboutDialog
-from netrecon import DatabaseManager, __version__
+from .windowing import (
+    apply_window_icon,
+    center_mapped_window,
+    center_window,
+    current_window_center,
+)
+from netrecon import __version__, preferences
+from netrecon.db_manager import DatabaseManager
 from netrecon import logger as nr_logger
 from netrecon.platform_utils import platform_info
 
@@ -26,6 +29,9 @@ PRADAFIT_LOGO = (
     " /_/     /_/    \\__,_/ \\__,_/  \\__,_/ /_/      /_/  \\__/"
 )
 
+WINDOW_WIDTH = 1300
+WINDOW_HEIGHT = 860
+
 
 class PradaFitApp(ctk.CTk):
     """Primary window with tabbed interface."""
@@ -39,22 +45,31 @@ class PradaFitApp(ctk.CTk):
         self.title(
             f"NetRecon v{__version__}: Network Reconnaissance Toolkit  |  by PradaFit"
         )
-        self.geometry("1300x860")
         self.minsize(960, 600)
 
-        try:
-            if platform_info.is_windows:
-                self.iconbitmap(default="")
-        except Exception as exc:
-            log.debug("Could not apply window icon: %s", type(exc).__name__)
+        self._window_icon_path = apply_window_icon(self)
+        if self._window_icon_path is None:
+            log.debug("Could not apply the NetRecon window icon")
 
         self.configure(fg_color=COLORS["bg_dark"])
 
         # Shared db
         self.db = DatabaseManager()
         self._about_dialog = None
+        self._dns_tab = None
+        self._scan_tab = None
+        self._geo_tab = None
+        self._hist_tab = None
+        self._tab_frames = {}
 
         self._build_ui()
+        self._monitor_anchor = preferences.get_window_anchor()
+        self._initial_placement = center_window(
+            self,
+            WINDOW_WIDTH,
+            WINDOW_HEIGHT,
+            anchor=self._monitor_anchor,
+        )
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_ui(self):
@@ -137,24 +152,64 @@ class PradaFitApp(ctk.CTk):
         )
         self.tabview.pack(fill="both", expand=True, padx=8, pady=(4, 4))
 
-        dns_frame = self.tabview.add("  DNS Lookup  ")
-        scan_frame = self.tabview.add("  Port Scanner  ")
-        geo_frame = self.tabview.add("  Geolocation  ")
-        hist_frame = self.tabview.add("  History  ")
-
-        self.dns_tab = DNSTab(dns_frame, status_bar=self.status_bar, db=self.db)
-        self.dns_tab.pack(fill="both", expand=True)
-
-        self.scan_tab = ScanTab(scan_frame, status_bar=self.status_bar, db=self.db)
-        self.scan_tab.pack(fill="both", expand=True)
-
-        self.geo_tab = GeoTab(geo_frame, status_bar=self.status_bar, db=self.db)
-        self.geo_tab.pack(fill="both", expand=True)
-
-        self.hist_tab = HistoryTab(hist_frame, status_bar=self.status_bar, db=self.db)
-        self.hist_tab.pack(fill="both", expand=True)
+        for name in ("DNS Lookup", "Port Scanner", "Geolocation", "History"):
+            self._tab_frames[name] = self.tabview.add(f"  {name}  ")
 
         self.tabview.set("  DNS Lookup  ")
+
+    def _ensure_tab(self, name):
+        """Build a tab on first use so the main window can render promptly."""
+        if name == "DNS Lookup" and self._dns_tab is None:
+            from .dns_tab import DNSTab
+
+            self._dns_tab = DNSTab(
+                self._tab_frames[name], status_bar=self.status_bar, db=self.db
+            )
+            self._dns_tab.pack(fill="both", expand=True)
+        elif name == "Port Scanner" and self._scan_tab is None:
+            from .scan_tab import ScanTab
+
+            self._scan_tab = ScanTab(
+                self._tab_frames[name], status_bar=self.status_bar, db=self.db
+            )
+            self._scan_tab.pack(fill="both", expand=True)
+        elif name == "Geolocation" and self._geo_tab is None:
+            from .geo_tab import GeoTab
+
+            self._geo_tab = GeoTab(
+                self._tab_frames[name], status_bar=self.status_bar, db=self.db
+            )
+            self._geo_tab.pack(fill="both", expand=True)
+        elif name == "History" and self._hist_tab is None:
+            from .history_tab import HistoryTab
+
+            self._hist_tab = HistoryTab(
+                self._tab_frames[name], status_bar=self.status_bar, db=self.db
+            )
+            self._hist_tab.pack(fill="both", expand=True)
+
+    def initialize_default_tab(self):
+        self._ensure_tab("DNS Lookup")
+
+    @property
+    def dns_tab(self):
+        self._ensure_tab("DNS Lookup")
+        return self._dns_tab
+
+    @property
+    def scan_tab(self):
+        self._ensure_tab("Port Scanner")
+        return self._scan_tab
+
+    @property
+    def geo_tab(self):
+        self._ensure_tab("Geolocation")
+        return self._geo_tab
+
+    @property
+    def hist_tab(self):
+        self._ensure_tab("History")
+        return self._hist_tab
 
     def _open_about(self):
         if self._about_dialog is not None:
@@ -168,7 +223,11 @@ class PradaFitApp(ctk.CTk):
         self._about_dialog = AboutDialog(self)
 
     def _on_close(self):
-        self.scan_tab.shutdown()
+        anchor = current_window_center(self)
+        if anchor is not None and not preferences.save_window_anchor(*anchor):
+            log.debug("Could not save the main-window monitor anchor")
+        if self._scan_tab is not None:
+            self._scan_tab.shutdown()
         self.destroy()
 
     def _on_tab_change(self):
@@ -177,7 +236,9 @@ class PradaFitApp(ctk.CTk):
         except Exception as exc:
             log.warning("Could not read selected tab: %s", type(exc).__name__)
             return
-        if name.strip() == "History":
+        selected = name.strip()
+        self._ensure_tab(selected)
+        if selected == "History":
             try:
                 self.hist_tab._refresh()
             except Exception:
@@ -194,10 +255,12 @@ def launch_gui():
         # CTkToplevel over a withdrawn root can tear down the interpreter
         # on Windows and the app silently exits.
         app.update_idletasks()
+        center_mapped_window(app, app._monitor_anchor)
         if not prompt_if_needed(app):
             log.info("User declined responsible-use notice; exiting")
             app.destroy()
             return
+        app.after_idle(app.initialize_default_tab)
         app.mainloop()
     except Exception:
         log.exception("NetRecon GUI crashed during startup")

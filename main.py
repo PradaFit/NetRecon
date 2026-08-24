@@ -23,15 +23,7 @@ import json
 import sys
 from pathlib import Path
 
-from netrecon import (
-    DNSEngine,
-    ScanEngine,
-    GeoEngine,
-    platform_info,
-    RECORD_TYPES,
-    SCAN_PROFILES,
-    __version__,
-)
+from netrecon import __version__
 
 
 BANNER = r"""
@@ -44,6 +36,8 @@ BANNER = r"""
 
 
 def _show_banner():
+    from netrecon.platform_utils import platform_info
+
     print(BANNER)
     print(f"  NetRecon v{__version__} | Network Reconnaissance Toolkit")
     print("  by PradaFit")
@@ -57,6 +51,8 @@ def _show_banner():
 
 
 def cli_dns(args):
+    from netrecon.dns_engine import DNSEngine
+
     engine = DNSEngine()
     target = args.target
 
@@ -89,6 +85,9 @@ def cli_dns(args):
 
 
 def cli_scan(args):
+    from netrecon.scan_engine import ScanEngine
+    from netrecon.platform_utils import platform_info
+
     engine = ScanEngine()
 
     profile = args.profile
@@ -139,6 +138,8 @@ def cli_scan(args):
 
 
 def cli_geo(args):
+    from netrecon.geo_engine import GeoEngine
+
     engine = GeoEngine()
 
     if args.myip:
@@ -179,6 +180,11 @@ def cli_geo(args):
 
 def cli_interactive():
     """REPL-style interactive mode."""
+    from netrecon.dns_engine import DNSEngine
+    from netrecon.geo_engine import GeoEngine
+    from netrecon.platform_utils import platform_info
+    from netrecon.scan_engine import ScanEngine
+
     _show_banner()
     print("  Type 'help' for commands, 'quit' to exit.\n")
 
@@ -300,8 +306,27 @@ def _is_cli_executable():
     )
 
 
+def _launch_gui():
+    try:
+        from gui.app import launch_gui
+
+        launch_gui()
+        return 0
+    except ImportError as exc:
+        print(f"[!] GUI dependencies missing: {exc}")
+        print("    Install with: pip install customtkinter")
+        print("    Or run with --cli for terminal mode.")
+        return 1
+
+
 def main():
     cli_executable = _is_cli_executable()
+    if not cli_executable and len(sys.argv) == 1:
+        return _launch_gui()
+
+    from netrecon.dns_engine import RECORD_TYPES
+    from netrecon.scan_engine import SCAN_PROFILES
+
     parser = argparse.ArgumentParser(
         prog="NetRecon-CLI" if cli_executable else "netrecon",
         description="NetRecon: Network Reconnaissance Toolkit (by PradaFit)",
@@ -360,17 +385,7 @@ def main():
     elif args.command == "geo":
         return cli_geo(args)
     else:
-        # Default: launch GUI
-        try:
-            from gui.app import launch_gui
-
-            launch_gui()
-            return 0
-        except ImportError as e:
-            print(f"[!] GUI dependencies missing: {e}")
-            print("    Install with: pip install customtkinter")
-            print("    Or run with --cli for terminal mode.")
-            return 1
+        return _launch_gui()
     return 0
 
 

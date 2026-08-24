@@ -57,12 +57,12 @@
 
 .EXAMPLE
     # Hardware token / HSM cert by thumbprint
-    .\packaging\sign-release.ps1 -Files .\packaging\Output\NetRecon-Setup-2.0.4.0.exe `
+    .\packaging\sign-release.ps1 -Files .\packaging\Output\NetRecon-Setup-2.0.5.0.exe `
         -CertThumbprint 0123456789ABCDEF0123456789ABCDEF01234567 -Verify
 
 .EXAMPLE
     # Azure Trusted Signing for the public standalone installer
-    .\packaging\sign-release.ps1 -Files .\packaging\Output\NetRecon-Setup-2.0.4.0.exe `
+    .\packaging\sign-release.ps1 -Files .\packaging\Output\NetRecon-Setup-2.0.5.0.exe `
         -TrustedSigning -TrustedSigningMetadata .\packaging\trusted-signing.json -Verify
 
 .NOTES

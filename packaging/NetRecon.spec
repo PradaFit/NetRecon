@@ -20,6 +20,8 @@ import os
 import sys
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
 # This spec file lives in <repo>\packaging\, so the repo root is one up.
 ROOT = Path(SPECPATH).resolve().parent
 
@@ -31,6 +33,7 @@ data_files = [
     (str(ROOT / "DISCLAIMER.md"), "."),
     (str(ROOT / "PRIVACY.md"), "."),
     (str(ROOT / "LICENSE"), "."),
+    (str(ROOT / "packaging" / "NetRecon.ico"), "packaging"),
 ]
 
 # customtkinter ships its own assets (themes, fonts) that PyInstaller
@@ -50,8 +53,8 @@ hidden_imports = [
     "requests",
     "whois",
 ]
+hidden_imports += collect_submodules("netrecon")
 
-from PyInstaller.utils.hooks import collect_data_files
 data_files += collect_data_files("customtkinter")
 data_files += collect_data_files("folium")
 data_files += collect_data_files("branca")

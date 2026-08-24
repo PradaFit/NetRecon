@@ -2,6 +2,7 @@ import csv
 import json
 import shlex
 import socket
+import subprocess
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -15,9 +16,13 @@ from netrecon.db_manager import DatabaseManager
 from netrecon.dns_engine import DNSEngine, DNSResult
 from netrecon.export_engine import ExportEngine
 from netrecon.geo_engine import GeoEngine, GeoResult
+from netrecon.platform_utils import PlatformInfo
 from netrecon.scan_engine import SCAN_PROFILES, ScanEngine
 from netrecon.validator import InputError, sanitize_nmap_args
 from netrecon import __version__
+from netrecon import preferences
+from gui import windowing
+from gui.windowing import apply_window_icon, calculate_centered_geometry, resource_path
 import main as app_main
 
 
@@ -36,8 +41,114 @@ def test_frozen_config_uses_pyinstaller_bundle_root(monkeypatch, tmp_path):
     assert app_config._config_path() == tmp_path / "config.json"
 
 
+def test_nmap_version_check_hides_windows_console(monkeypatch):
+    info = PlatformInfo()
+    info.is_windows = True
+    info._nmap_path = r"C:\Program Files\Nmap\nmap.exe"
+    no_window = 0x08000000
+    monkeypatch.setattr(
+        "netrecon.platform_utils.subprocess.CREATE_NO_WINDOW",
+        no_window,
+        raising=False,
+    )
+    captured = {}
+
+    def fake_check_output(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return b"Nmap version 7.98 ( https://nmap.org )\n"
+
+    monkeypatch.setattr(
+        "netrecon.platform_utils.subprocess.check_output", fake_check_output
+    )
+
+    assert info.get_nmap_version().startswith("Nmap version 7.98")
+    assert captured["command"] == [info._nmap_path, "--version"]
+    assert captured["kwargs"]["creationflags"] == no_window
+    assert captured["kwargs"]["stdin"] is subprocess.DEVNULL
+
+
+def test_window_geometry_centers_on_positive_and_negative_monitors():
+    assert calculate_centered_geometry(1300, 860, (0, 0, 1920, 1040)) == (
+        1300,
+        860,
+        310,
+        90,
+    )
+    assert calculate_centered_geometry(1300, 860, (-1920, 0, 0, 1040)) == (
+        1300,
+        860,
+        -1610,
+        90,
+    )
+    assert calculate_centered_geometry(1300, 860, (0, 0, 1024, 768)) == (
+        1024,
+        768,
+        0,
+        0,
+    )
+
+
+def test_window_anchor_preferences_are_validated_and_persisted(monkeypatch, tmp_path):
+    monkeypatch.setattr(preferences, "PREFS_DIR", tmp_path)
+    monkeypatch.setattr(preferences, "PREFS_PATH", tmp_path / "preferences.json")
+    assert preferences.get_window_anchor() is None
+    assert preferences.save_window_anchor(-1200, 450) is True
+    assert preferences.get_window_anchor() == (-1200, 450)
+
+    preferences.PREFS_PATH.write_text(
+        json.dumps({"window_center": {"x": True, "y": 450}}), encoding="utf-8"
+    )
+    assert preferences.get_window_anchor() is None
+
+
+def test_window_icon_is_available_in_source_and_frozen_layout(monkeypatch, tmp_path):
+    source_icon = resource_path("packaging", "NetRecon.ico")
+    assert source_icon.is_file()
+    bundled_icon = tmp_path / "packaging" / "NetRecon.ico"
+    bundled_icon.parent.mkdir()
+    bundled_icon.write_bytes(b"ico")
+    monkeypatch.setattr("gui.windowing.sys._MEIPASS", str(tmp_path), raising=False)
+    assert resource_path("packaging", "NetRecon.ico") == bundled_icon
+
+    class FakeWindow:
+        def __init__(self):
+            self.calls = []
+
+        def iconbitmap(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+
+    window = FakeWindow()
+    assert apply_window_icon(window) == bundled_icon
+    expected_calls = [((str(bundled_icon),), {})]
+    if windowing.sys.platform.startswith("win"):
+        expected_calls.append(((), {"default": str(bundled_icon)}))
+    assert window.calls == expected_calls
+
+
+def test_center_window_accounts_for_customtkinter_dpi_scaling(monkeypatch):
+    monkeypatch.setattr(
+        windowing, "_windows_work_area", lambda anchor: (0, 0, 1920, 1040)
+    )
+
+    class FakeWindow:
+        applied_geometry = None
+
+        @staticmethod
+        def _get_window_scaling():
+            return 1.25
+
+        def geometry(self, value):
+            self.applied_geometry = value
+
+    window = FakeWindow()
+    placement = windowing.center_window(window, 1300, 860, anchor=(200, 200))
+    assert placement == (1300, 832, 147, 0)
+    assert window.applied_geometry == "1300x832+147+0"
+
+
 def test_release_version_metadata_is_consistent():
-    assert __version__ == "2.0.4"
+    assert __version__ == "2.0.5"
     assert json.loads((ROOT / "config.json").read_text(encoding="utf-8"))["version"] == __version__
     four_part = f"{__version__}.0"
     assert four_part in (ROOT / "packaging" / "version_info.txt").read_text(
@@ -74,6 +185,8 @@ def test_packaging_source_defines_gui_cli_and_store_alias():
     assert 'name="NetRecon-CLI"' in spec
     assert "console=False" in spec
     assert "console=True" in spec
+    assert '(str(ROOT / "packaging" / "NetRecon.ico"), "packaging")' in spec
+    assert 'collect_submodules("netrecon")' in spec
 
     inno = (ROOT / "packaging" / "NetRecon.iss").read_text(encoding="utf-8")
     assert '#define MyCliExeName     "NetRecon-CLI.exe"' in inno

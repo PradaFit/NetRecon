@@ -11,7 +11,7 @@
 ; ===========================================================================
 
 #define MyAppName        "NetRecon Network Toolkit"
-#define MyAppVersion     "2.0.4.0"
+#define MyAppVersion     "2.0.5.0"
 #define MyAppPublisher   "PradaFit"
 #define MyAppURL         "https://github.com/PradaFit/NetRecon"
 #define MyAppExeName     "NetRecon.exe"

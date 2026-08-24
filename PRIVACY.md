@@ -1,10 +1,10 @@
 # NetRecon Privacy Policy
 
 **App:** NetRecon
-**Version:** 2.0.4
+**Version:** 2.0.5
 **Publisher:** PradaFitDev
 **License:** GNU General Public License v3.0 (open source)
-**Effective date:** 2026-08-23
+**Effective date:** 2026-08-24
 
 NetRecon is an open-source desktop and command-line toolkit for DNS
 lookups, port scanning, IP geolocation, and related network

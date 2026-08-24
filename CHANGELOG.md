@@ -1,5 +1,25 @@
 # NetRecon Changelog
 
+## 2.0.5 - 2026-08-24
+
+### Performance
+
+- Reduced startup work with lazy engine exports and on-demand tab initialization so the main window renders before inactive features are constructed.
+- Deferred command-line parser and scan-profile imports when launching the desktop interface without arguments.
+
+### Fixed
+
+- Applied the NetRecon logo to the main window and supporting dialogs instead of the default toolkit icon.
+- Reopened the main window centered on the monitor where it was last used, with safe fallback when that display is disconnected.
+- Corrected the visible-frame calculation so the title bar and window borders are centered across standard, scaled, and negative-coordinate monitor layouts.
+- Included every lazily loaded NetRecon module in packaged builds so on-demand tabs initialize correctly after launch.
+- Kept the Port Scanner responsive while Nmap version details load in the background and suppressed the transient Windows console window.
+
+### Verification and packaging
+
+- Added regression coverage for lazy tab creation, icon resources, saved monitor anchors, negative monitor coordinates, and display scaling.
+- Synchronized application, executable, installer, development manifest, privacy policy, and Microsoft Store package inputs at version 2.0.5 / 2.0.5.0.
+
 ## 2.0.4 - 2026-08-23
 
 ### Fixed

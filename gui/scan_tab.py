@@ -49,8 +49,13 @@ class ScanTab(ctk.CTkFrame, UiDispatcher):
         self._progress_percent = None
         self._progress_detail = ""
         self._last_console_progress_bucket = None
+        self._nmap_status_label = None
+        self._nmap_admin_text = "No"
+        self._nmap_version_thread = None
         self._build_ui()
         self._init_ui_dispatcher()
+        if self.engine.is_available:
+            self._start_nmap_version_lookup()
 
     def _build_ui(self):
         # availability banner
@@ -59,26 +64,24 @@ class ScanTab(ctk.CTkFrame, UiDispatcher):
         info_bar.pack(fill="x", padx=10, pady=(10, 2))
 
         if nmap_ok:
-            ver = platform_info.get_nmap_version() or "detected"
-            admin_s = "Yes" if platform_info.is_admin else "No"
-            msg = (
-                f"  Nmap: {ver}  |  Admin: {admin_s}  |  Native async TCP scanner ready"
-            )
-            ctk.CTkLabel(
+            self._nmap_admin_text = "Yes" if platform_info.is_admin else "No"
+            self._nmap_status_label = ctk.CTkLabel(
                 info_bar,
-                text=msg,
+                text=self._format_nmap_status("detected"),
                 font=(FONT_FAMILY, 11),
                 text_color=COLORS["text_dim"],
                 anchor="w",
-            ).pack(padx=10, pady=6)
+            )
+            self._nmap_status_label.pack(padx=10, pady=6)
         else:
-            ctk.CTkLabel(
+            self._nmap_status_label = ctk.CTkLabel(
                 info_bar,
                 text="  Nmap not detected. Native async scanner is still available for TCP connect scans.",
                 font=(FONT_FAMILY, 11),
                 text_color=COLORS["warning"],
                 anchor="w",
-            ).pack(padx=10, pady=6)
+            )
+            self._nmap_status_label.pack(padx=10, pady=6)
 
         # inputs row 1
         row1 = ctk.CTkFrame(self, fg_color="transparent")
@@ -222,6 +225,29 @@ class ScanTab(ctk.CTkFrame, UiDispatcher):
             on_clear=self._clear,
         )
         self.export_bar.pack(fill="x", padx=10, pady=(0, 10))
+
+    def _format_nmap_status(self, version):
+        return (
+            f"  Nmap: {version}  |  Admin: {self._nmap_admin_text}  |  "
+            "Native async TCP scanner ready"
+        )
+
+    def _start_nmap_version_lookup(self):
+        """Resolve the optional Nmap version without blocking Tk."""
+        self._nmap_version_thread = threading.Thread(
+            target=self._load_nmap_version,
+            name="NetReconNmapVersion",
+            daemon=True,
+        )
+        self._nmap_version_thread.start()
+
+    def _load_nmap_version(self):
+        version = platform_info.get_nmap_version() or "detected"
+        self.post_ui(self._show_nmap_version, version)
+
+    def _show_nmap_version(self, version):
+        if self._nmap_status_label is not None:
+            self._nmap_status_label.configure(text=self._format_nmap_status(version))
 
     # profile selection
 

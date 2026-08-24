@@ -50,6 +50,20 @@ def test_all_visible_buttons_are_bound_and_safe_to_invoke(monkeypatch):
     app = PradaFitApp()
     app.withdraw()
     try:
+        assert app._dns_tab is None
+        assert app._scan_tab is None
+        assert app._geo_tab is None
+        assert app._hist_tab is None
+        app.initialize_default_tab()
+        for tab_name in ("Port Scanner", "Geolocation", "History", "DNS Lookup"):
+            app.tabview.set(f"  {tab_name}  ")
+            app._on_tab_change()
+            app.update()
+
+        if os.name == "nt":
+            assert app._window_icon_path is not None
+            assert app._window_icon_path.name == "NetRecon.ico"
+
         class OfflineGeoEngine:
             MAX_BULK_TARGETS = 1000
 
@@ -100,6 +114,8 @@ def test_all_visible_buttons_are_bound_and_safe_to_invoke(monkeypatch):
         app.update()
         about = app._about_dialog
         about.withdraw()
+        if os.name == "nt":
+            assert about._window_icon_path is not None
         about_buttons = _buttons(about)
         assert {button.cget("text") for button in about_buttons} >= {
             "GitHub Repository",
@@ -123,6 +139,8 @@ def test_all_visible_buttons_are_bound_and_safe_to_invoke(monkeypatch):
         notice = first_run.ResponsibleUseDialog(app)
         notice.withdraw()
         app.update()
+        if os.name == "nt":
+            assert notice._window_icon_path is not None
         notice_buttons = _buttons(notice)
         assert {button.cget("text") for button in notice_buttons} == {
             "Continue",
@@ -288,5 +306,43 @@ def test_immediate_cancel_during_worker_startup_is_not_lost(monkeypatch):
         assert engine.stop.is_set()
         assert "cancelled" in app.status_bar._label.cget("text").lower()
     finally:
+        if app.winfo_exists():
+            app._on_close()
+
+
+def test_port_scanner_tab_does_not_wait_for_nmap_version(monkeypatch):
+    from gui.app import PradaFitApp
+    from netrecon.platform_utils import platform_info
+
+    lookup_started = threading.Event()
+    release_lookup = threading.Event()
+
+    monkeypatch.setattr(platform_info, "find_nmap", lambda: r"C:\Nmap\nmap.exe")
+
+    def slow_version_lookup():
+        lookup_started.set()
+        release_lookup.wait(3)
+        return "Nmap version 7.98"
+
+    monkeypatch.setattr(platform_info, "get_nmap_version", slow_version_lookup)
+
+    app = PradaFitApp()
+    app.withdraw()
+    try:
+        started_at = time.perf_counter()
+        tab = app.scan_tab
+        construction_time = time.perf_counter() - started_at
+
+        assert construction_time < 0.75
+        assert lookup_started.wait(1)
+        assert "Nmap: detected" in tab._nmap_status_label.cget("text")
+
+        release_lookup.set()
+        assert _pump(
+            app,
+            lambda: "Nmap version 7.98" in tab._nmap_status_label.cget("text"),
+        )
+    finally:
+        release_lookup.set()
         if app.winfo_exists():
             app._on_close()

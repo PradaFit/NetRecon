@@ -4,9 +4,9 @@ Local user preferences for NetRecon.
 Stored as JSON under the user's home directory at:
     ~/.netrecon/preferences.json
 
-Used to persist things like the first-run responsible-use acceptance so
-the notice does not appear on every launch. Safe defaults are returned
-when the file is missing or malformed.
+Used to persist the first-run responsible-use acceptance and the last
+main-window monitor anchor. Safe defaults are returned when the file is
+missing or malformed.
 """
 
 import json
@@ -68,4 +68,30 @@ def accept_responsible_use(app_version: str) -> bool:
     data["responsible_use_accepted"] = True
     data["responsible_use_accepted_at"] = datetime.now(timezone.utc).isoformat()
     data["responsible_use_version"] = app_version
+    return save(data)
+
+
+def get_window_anchor() -> tuple[int, int] | None:
+    """Return the last valid main-window center point, if one was saved."""
+    anchor = load().get("window_center")
+    if not isinstance(anchor, dict):
+        return None
+    x = anchor.get("x")
+    y = anchor.get("y")
+    if (
+        isinstance(x, bool)
+        or isinstance(y, bool)
+        or not isinstance(x, int)
+        or not isinstance(y, int)
+    ):
+        return None
+    if not (-1_000_000 <= x <= 1_000_000 and -1_000_000 <= y <= 1_000_000):
+        return None
+    return x, y
+
+
+def save_window_anchor(x: int, y: int) -> bool:
+    """Persist the window center used to choose a monitor on next launch."""
+    data = load()
+    data["window_center"] = {"x": int(x), "y": int(y)}
     return save(data)

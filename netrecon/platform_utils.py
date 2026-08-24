@@ -77,8 +77,13 @@ class PlatformInfo:
         if not nmap_path:
             return None
         try:
+            creation_flags = subprocess.CREATE_NO_WINDOW if self.is_windows else 0
             out = subprocess.check_output(  # nosec
-                [nmap_path, "--version"], stderr=subprocess.STDOUT, timeout=5
+                [nmap_path, "--version"],
+                stdin=subprocess.DEVNULL,
+                stderr=subprocess.STDOUT,
+                timeout=5,
+                creationflags=creation_flags,
             ).decode("utf-8", errors="replace")
             for line in out.splitlines():
                 if "nmap" in line.lower():

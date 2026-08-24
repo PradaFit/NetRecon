@@ -16,6 +16,7 @@ import customtkinter as ctk
 from netrecon import __version__, __author__
 from netrecon import logger as nr_logger
 from .theme import COLORS, FONT_FAMILY, FONT_MONO
+from .windowing import apply_window_icon
 
 
 GITHUB_URL = "https://github.com/PradaFit/NetRecon"
@@ -67,6 +68,7 @@ class AboutDialog(ctk.CTkToplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("About NetRecon")
+        self._window_icon_path = apply_window_icon(self)
         self.geometry("620x540")
         self.minsize(560, 480)
         self.configure(fg_color=COLORS["bg_dark"])

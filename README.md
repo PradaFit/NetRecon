@@ -177,7 +177,7 @@ python main.py --cli
 
 Windows installer builds include `NetRecon-CLI.exe`. Open **NetRecon CLI**
 from the Start Menu for interactive mode, or run commands from the install
-directory. The 2.0.4 Microsoft Store package registers the
+directory. The 2.0.5 Microsoft Store package registers the
 `netrecon-cli.exe` execution alias. Source checkouts can replace
 `NetRecon-CLI.exe` with `python main.py`
 in the examples below.
