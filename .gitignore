@@ -45,3 +45,5 @@ packaging/*.bak
 RELEASE_CHECKLIST.md
 STORE_LISTING_DRAFT.md
 
+# GitHub Actions are not used for this project
+.github/workflows/

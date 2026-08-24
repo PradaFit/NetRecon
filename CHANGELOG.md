@@ -26,7 +26,7 @@
 - Added an installer shortcut and Microsoft Store execution alias for the packaged CLI.
 - Added the packaging scripts, manifests, version resources, and image assets needed to reproduce release builds while excluding generated output and signing credentials.
 - Made the license, privacy policy, and disclaimer mandatory inputs for MSIX builds.
-- Added a security reporting policy and a Windows CI workflow for linting, tests, dependency auditing, and dual-executable build checks.
+- Added a security reporting policy and expanded local checks for linting, tests, dependency auditing, and dual-executable builds.
 
 ## 2.0.3 - 2026-08-23
 
