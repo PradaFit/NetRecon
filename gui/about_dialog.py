@@ -22,6 +22,7 @@ GITHUB_URL = "https://github.com/PradaFit/NetRecon"
 ISSUES_URL = "https://github.com/PradaFit/NetRecon/issues"
 SUPPORT_URL = "https://github.com/PradaFit/NetRecon"
 PRIVACY_URL = "https://github.com/PradaFit/NetRecon/blob/main/PRIVACY.md"
+log = nr_logger.get_logger("gui.about")
 
 
 def _find_bundled(filename: str) -> Path | None:
@@ -86,8 +87,8 @@ class AboutDialog(ctk.CTkToplevel):
             w = self.winfo_width()
             h = self.winfo_height()
             self.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Could not center About window: %s", type(exc).__name__)
 
     def _build_header(self):
         head = ctk.CTkFrame(self, fg_color="transparent")
@@ -258,7 +259,8 @@ class AboutDialog(ctk.CTkToplevel):
 
     def _open_url(self, url):
         try:
-            webbrowser.open_new_tab(url)
+            if not webbrowser.open_new_tab(url):
+                raise RuntimeError("No default browser accepted the URL")
         except Exception:
             messagebox.showerror("NetRecon", f"Could not open browser:\n{url}")
 
@@ -266,10 +268,10 @@ class AboutDialog(ctk.CTkToplevel):
         local = _find_bundled("PRIVACY.md")
         if local:
             try:
-                webbrowser.open_new_tab(local.as_uri())
-                return
-            except Exception:
-                pass
+                if webbrowser.open_new_tab(local.as_uri()):
+                    return
+            except Exception as exc:
+                log.debug("Could not open local privacy file: %s", type(exc).__name__)
         self._open_url(PRIVACY_URL)
 
     def _export_log(self):

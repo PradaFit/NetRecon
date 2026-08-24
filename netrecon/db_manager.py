@@ -12,15 +12,23 @@ from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
+from .config import get_section
+
 
 class DatabaseManager:
 
     def __init__(self, db_path=None):
         if db_path is None:
-            app_dir = Path.home() / ".netrecon"
-            app_dir.mkdir(exist_ok=True)
-            db_path = app_dir / "history.db"
-        self.db_path = str(db_path)
+            configured_path = get_section("database").get("path")
+            if configured_path:
+                db_path = Path(str(configured_path)).expanduser()
+            else:
+                app_dir = Path.home() / ".netrecon"
+                app_dir.mkdir(exist_ok=True)
+                db_path = app_dir / "history.db"
+        resolved_path = Path(db_path).expanduser().resolve()
+        resolved_path.parent.mkdir(parents=True, exist_ok=True)
+        self.db_path = str(resolved_path)
         self._setup()
 
     def _setup(self):
@@ -105,13 +113,31 @@ class DatabaseManager:
                 "SELECT * FROM scan_history WHERE id = ?", (int(scan_id),)
             ).fetchone()
             if row:
-                data = dict(row)
-                try:
-                    data["result_data"] = json.loads(data["result_data"])
-                except (json.JSONDecodeError, TypeError):
-                    data["result_data"] = {}
-                return data
+                return self._decode_row(row)
         return None
+
+    def get_export_records(self, limit=10000):
+        """Return complete history rows, including decoded result payloads."""
+        limit = max(1, min(int(limit), 10000))
+        with closing(self._conn()) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM scan_history ORDER BY timestamp DESC LIMIT ?", (limit,)
+            ).fetchall()
+            return [self._decode_row(row) for row in rows]
+
+    @staticmethod
+    def _decode_row(row):
+        data = dict(row)
+        try:
+            data["result_data"] = json.loads(data.get("result_data") or "null")
+        except (json.JSONDecodeError, TypeError):
+            data["result_data"] = {}
+        try:
+            data["tags"] = json.loads(data.get("tags") or "null")
+        except (json.JSONDecodeError, TypeError):
+            data["tags"] = None
+        return data
 
     def delete(self, scan_id):
         with closing(self._conn()) as conn, conn:

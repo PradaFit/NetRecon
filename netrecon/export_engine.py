@@ -6,7 +6,6 @@ inside an allowed root (home, system temp, or current working directory).
 
 import json
 import csv
-import os
 import tempfile
 import html as html_mod
 from datetime import datetime
@@ -60,10 +59,15 @@ class ExportEngine:
         rows = ExportEngine._flatten_for_csv(payload)
         if not rows:
             return None
-        with open(p, "w", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=rows[0].keys())
+        fieldnames = list(dict.fromkeys(key for row in rows for key in row.keys()))
+        safe_rows = [
+            {key: ExportEngine._csv_safe(value) for key, value in row.items()}
+            for row in rows
+        ]
+        with open(p, "w", newline="", encoding="utf-8-sig") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(rows)
+            writer.writerows(safe_rows)
         return str(p)
 
     @staticmethod
@@ -88,13 +92,21 @@ class ExportEngine:
         locations = []
         for item in geo_results:
             d = item.to_dict() if hasattr(item, "to_dict") else item
-            if d.get("latitude") and d.get("longitude"):
-                locations.append(d)
+            try:
+                if d.get("latitude") is None or d.get("longitude") is None:
+                    continue
+                lat = float(d["latitude"])
+                lng = float(d["longitude"])
+                if not -90 <= lat <= 90 or not -180 <= lng <= 180:
+                    continue
+            except (AttributeError, KeyError, TypeError, ValueError):
+                continue
+            locations.append((d, lat, lng))
 
         if not locations:
             return None
 
-        center = [locations[0]["latitude"], locations[0]["longitude"]]
+        center = [locations[0][1], locations[0][2]]
         m = folium.Map(location=center, zoom_start=4, tiles="OpenStreetMap")
 
         container = m
@@ -114,7 +126,8 @@ class ExportEngine:
             "pink",
         ]
 
-        for idx, loc in enumerate(locations):
+        points = []
+        for idx, (loc, lat, lng) in enumerate(locations):
             color = palette[idx % len(palette)]
             ip_safe = html_mod.escape(str(loc.get("ip", "")))
             city_safe = html_mod.escape(str(loc.get("city", "")))
@@ -123,12 +136,6 @@ class ExportEngine:
             isp_safe = html_mod.escape(str(loc.get("isp", "N/A")))
             org_safe = html_mod.escape(str(loc.get("org", "N/A")))
             asn_safe = html_mod.escape(str(loc.get("asn", "N/A")))
-            try:
-                lat = float(loc.get("latitude", 0) or 0)
-                lng = float(loc.get("longitude", 0) or 0)
-            except (TypeError, ValueError):
-                lat, lng = 0.0, 0.0
-
             popup = (
                 f"<div style='font-family:sans-serif;min-width:200px'>"
                 f"<h4 style='margin:0 0 6px'>{ip_safe}</h4>"
@@ -140,14 +147,14 @@ class ExportEngine:
                 f"</div>"
             )
             folium.Marker(
-                location=[loc["latitude"], loc["longitude"]],
+                location=[lat, lng],
                 popup=folium.Popup(popup, max_width=300),
                 tooltip=f"{ip_safe} - {city_safe}, {country_safe}",
                 icon=folium.Icon(color=color, icon="info-sign"),
             ).add_to(container)
+            points.append([lat, lng])
 
         if len(locations) > 1:
-            points = [[l["latitude"], l["longitude"]] for l in locations]
             folium.PolyLine(
                 points, weight=2, color="blue", opacity=0.6, dash_array="5"
             ).add_to(m)
@@ -164,6 +171,18 @@ class ExportEngine:
         if isinstance(data, list):
             return [d.to_dict() if hasattr(d, "to_dict") else d for d in data]
         return data
+
+    @staticmethod
+    def _csv_safe(value):
+        """Prevent spreadsheet formula execution in exported string cells."""
+        if not isinstance(value, str):
+            return value
+        stripped = value.lstrip()
+        if stripped.startswith(("=", "+", "-", "@")) or value.startswith(
+            ("\t", "\r")
+        ):
+            return "'" + value
+        return value
 
     @staticmethod
     def _flatten_for_csv(data):

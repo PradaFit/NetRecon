@@ -1,11 +1,10 @@
 """Scan History tab"""
 
 import json
-import threading
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
-from .theme import COLORS, FONT_FAMILY, FONT_MONO
+from .theme import COLORS, FONT_FAMILY
 from .widgets import OutputConsole
 from netrecon import DatabaseManager, ExportEngine
 from netrecon import logger as nr_logger
@@ -243,6 +242,13 @@ class HistoryTab(ctk.CTkFrame):
 
     def _delete(self):
         if self._selected_id is None:
+            self._set_status("Select a history item to delete", "warning")
+            return
+        if not messagebox.askyesno(
+            "Delete History Item",
+            "Delete the selected history item?",
+            parent=self,
+        ):
             return
         self.db.delete(self._selected_id)
         self._selected_id = None
@@ -251,14 +257,16 @@ class HistoryTab(ctk.CTkFrame):
         self._set_status("Scan deleted", "success")
 
     def _clear_all(self):
-        if messagebox.askyesno("Clear History", "Delete all scan history?"):
+        if messagebox.askyesno(
+            "Clear History", "Delete all scan history?", parent=self
+        ):
             self.db.clear()
             self._refresh()
             self.detail.clear()
             self._set_status("History cleared", "success")
 
     def _export_all(self):
-        records = self.db.get_history(limit=10000)
+        records = self.db.get_export_records(limit=10000)
         if not records:
             messagebox.showinfo(
                 "NetRecon",

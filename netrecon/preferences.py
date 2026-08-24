@@ -10,7 +10,7 @@ when the file is missing or malformed.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -50,13 +50,22 @@ def save(data: dict) -> bool:
         return False
 
 
-def is_responsible_use_accepted() -> bool:
-    return bool(load().get("responsible_use_accepted"))
+def is_responsible_use_accepted(app_version=None) -> bool:
+    data = load()
+    if not data.get("responsible_use_accepted"):
+        return False
+    if not app_version:
+        return True
+    accepted_version = str(data.get("responsible_use_version", ""))
+    try:
+        return accepted_version.split(".", 1)[0] == str(app_version).split(".", 1)[0]
+    except (AttributeError, IndexError):
+        return False
 
 
 def accept_responsible_use(app_version: str) -> bool:
     data = load()
     data["responsible_use_accepted"] = True
-    data["responsible_use_accepted_at"] = datetime.utcnow().isoformat() + "Z"
+    data["responsible_use_accepted_at"] = datetime.now(timezone.utc).isoformat()
     data["responsible_use_version"] = app_version
     return save(data)

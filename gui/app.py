@@ -16,6 +16,8 @@ from netrecon import logger as nr_logger
 from netrecon.platform_utils import platform_info
 
 
+log = nr_logger.get_logger("gui")
+
 PRADAFIT_LOGO = (
     " ________              _________      ___________________\n"
     " ___  __ \\____________ ______  /_____ ___  ____/__(_)_  /_\n"
@@ -43,15 +45,17 @@ class PradaFitApp(ctk.CTk):
         try:
             if platform_info.is_windows:
                 self.iconbitmap(default="")
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Could not apply window icon: %s", type(exc).__name__)
 
         self.configure(fg_color=COLORS["bg_dark"])
 
         # Shared db
         self.db = DatabaseManager()
+        self._about_dialog = None
 
         self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_ui(self):
         header = ctk.CTkFrame(
@@ -153,23 +157,35 @@ class PradaFitApp(ctk.CTk):
         self.tabview.set("  DNS Lookup  ")
 
     def _open_about(self):
-        AboutDialog(self)
+        if self._about_dialog is not None:
+            try:
+                if self._about_dialog.winfo_exists():
+                    self._about_dialog.focus_force()
+                    return
+            except Exception as exc:
+                log.debug("About window state check failed: %s", type(exc).__name__)
+                self._about_dialog = None
+        self._about_dialog = AboutDialog(self)
+
+    def _on_close(self):
+        self.scan_tab.shutdown()
+        self.destroy()
 
     def _on_tab_change(self):
         try:
             name = self.tabview.get()
-        except Exception:
+        except Exception as exc:
+            log.warning("Could not read selected tab: %s", type(exc).__name__)
             return
         if name.strip() == "History":
             try:
                 self.hist_tab._refresh()
             except Exception:
-                pass
+                log.exception("History refresh failed")
 
 
 def launch_gui():
     """Fire up the GUI."""
-    log = nr_logger.get_logger("gui")
     log.info("NetRecon GUI starting (v%s)", __version__)
     try:
         app = PradaFitApp()

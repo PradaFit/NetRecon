@@ -1,17 +1,27 @@
 """
 IP geolocation engine with multi-provider failover.
-Uses three free APIs in a cascade so one rate-limit or outage doesn't break the entire workflow.  
+Uses HTTPS providers in a cascade so one rate limit or outage does not break the workflow.
 All user inputs pass through the validator before they hit any network call.
 """
 
+import ipaddress
+import json
+import os
 import re
-import subprocess
+# Required for a fixed local traceroute command that never invokes a shell.
+import subprocess  # nosec B404
+import threading
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 
-from .validator import sanitize_target, resolve_to_ip, InputError
+from .validator import resolve_to_ip, InputError
+from .config import get_section
+from .logger import get_logger
+
+
+log = get_logger("geo")
 
 
 @dataclass
@@ -22,8 +32,8 @@ class GeoResult:
     region: str = ""
     city: str = ""
     zip_code: str = ""
-    latitude: float = 0.0
-    longitude: float = 0.0
+    latitude: float = None
+    longitude: float = None
     timezone: str = ""
     isp: str = ""
     org: str = ""
@@ -42,7 +52,7 @@ class GeoResult:
 
     @property
     def coordinates(self):
-        if self.latitude and self.longitude:
+        if self.latitude is not None and self.longitude is not None:
             return (self.latitude, self.longitude)
         return None
 
@@ -53,17 +63,54 @@ class GeoResult:
 
 
 class GeoEngine:
-    PROVIDERS = ["ip-api", "ipapi_co", "ipwhois"]
+    PROVIDERS = ["ipwhois", "ipapi_co"]
+    MAX_BULK_TARGETS = 1000
+    MAX_RESPONSE_BYTES = 1024 * 1024
 
-    def __init__(self, timeout=10):
-        self.timeout = timeout
-        self._session = requests.Session()
-        self._session.headers.update(
-            {
-                "User-Agent": "PradaFit/2.0",
-                "Accept": "application/json",
-            }
+    def __init__(self, timeout=None):
+        settings = get_section("geo")
+        self.timeout = max(1.0, min(float(timeout or settings.get("timeout", 10)), 30.0))
+        self._thread_local = threading.local()
+
+    def _session(self):
+        session = getattr(self._thread_local, "session", None)
+        if session is None:
+            session = requests.Session()
+            session.headers.update(
+                {
+                    "User-Agent": "NetRecon Desktop",
+                    "Accept": "application/json",
+                }
+            )
+            self._thread_local.session = session
+        return session
+
+    def _get_json(self, url):
+        response = self._session().get(
+            url,
+            timeout=(3.05, self.timeout),
+            allow_redirects=False,
         )
+        response.raise_for_status()
+        content_length = response.headers.get("Content-Length")
+        if content_length and int(content_length) > self.MAX_RESPONSE_BYTES:
+            raise RuntimeError("Provider response was unexpectedly large")
+        payload = response.content
+        if len(payload) > self.MAX_RESPONSE_BYTES:
+            raise RuntimeError("Provider response was unexpectedly large")
+        data = json.loads(payload.decode("utf-8"))
+        if not isinstance(data, dict):
+            raise RuntimeError("Provider returned an invalid JSON object")
+        return data
+
+    @staticmethod
+    def _coordinate(value, minimum, maximum):
+        if value is None or value == "":
+            return None
+        number = float(value)
+        if not minimum <= number <= maximum:
+            raise RuntimeError("Provider returned invalid coordinates")
+        return number
 
     def locate(self, target, provider=None):
         """
@@ -75,31 +122,49 @@ class GeoEngine:
         except InputError:
             return GeoResult(ip=target, error=f"Cannot resolve '{target}'")
 
+        try:
+            if not ipaddress.ip_address(ip).is_global:
+                return GeoResult(
+                    ip=ip,
+                    error="Geolocation is available only for public IP addresses",
+                )
+        except ValueError:
+            return GeoResult(ip=ip, error=f"Invalid resolved IP address: {ip}")
+
+        if provider and provider not in self.PROVIDERS:
+            return GeoResult(ip=ip, error=f"Unknown geolocation provider: {provider}")
         providers = [provider] if provider else self.PROVIDERS
         last_err = ""
 
         for prov in providers:
             try:
-                if prov == "ip-api":
-                    return self._query_ip_api(ip)
-                elif prov == "ipapi_co":
+                if prov == "ipapi_co":
                     return self._query_ipapi_co(ip)
                 elif prov == "ipwhois":
                     return self._query_ipwhois(ip)
             except Exception as exc:
                 last_err = str(exc)
+                log.debug("Geolocation provider failed: %s", type(exc).__name__)
                 continue
 
         return GeoResult(ip=ip, error=f"All providers failed -- last error: {last_err}")
 
     def bulk_locate(self, targets, provider=None):
-        clean = [t.strip() for t in targets if t.strip()]
+        clean = list(dict.fromkeys(t.strip() for t in targets if t.strip()))
+        if len(clean) > self.MAX_BULK_TARGETS:
+            raise InputError(
+                f"Bulk lookup is limited to {self.MAX_BULK_TARGETS} unique targets"
+            )
         results = []
         workers = min(15, max(1, len(clean)))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futs = {pool.submit(self.locate, t, provider): t for t in clean}
             for f in as_completed(futs):
-                results.append(f.result())
+                target = futs[f]
+                try:
+                    results.append(f.result())
+                except Exception as exc:
+                    results.append(GeoResult(ip=target, error=f"Lookup failed: {exc}"))
         return results
 
     def traceroute_geo(self, target):
@@ -125,7 +190,15 @@ class GeoEngine:
             run_timeout = 30
 
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=run_timeout)
+            creation_flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            # The validated IP is passed as a separate argument.
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=run_timeout,
+                creationflags=creation_flags,
+            )  # nosec B603
             raw = proc.stdout
         except subprocess.TimeoutExpired:
             return [GeoResult(ip=ip, error="Traceroute timed out")]
@@ -158,53 +231,24 @@ class GeoEngine:
         ]
         for url in endpoints:
             try:
-                resp = self._session.get(url, timeout=self.timeout)
+                resp = self._session().get(
+                    url, timeout=(3.05, self.timeout), allow_redirects=False
+                )
+                resp.raise_for_status()
                 if "json" in url:
-                    return resp.json().get("ip")
-                return resp.text.strip()
-            except Exception:
+                    candidate = resp.json().get("ip")
+                else:
+                    candidate = resp.text.strip()
+                if candidate and ipaddress.ip_address(candidate).is_global:
+                    return candidate
+            except Exception as exc:
+                log.debug("Public IP provider failed: %s", type(exc).__name__)
                 continue
         return None
 
-
-    def _query_ip_api(self, ip):
-        fields = (
-            "status,message,country,countryCode,region,regionName,"
-            "city,zip,lat,lon,timezone,isp,org,as,asname,reverse,"
-            "proxy,mobile,hosting,query"
-        )
-        url = f"http://ip-api.com/json/{ip}?fields={fields}"
-        resp = self._session.get(url, timeout=self.timeout)
-        d = resp.json()
-
-        if d.get("status") == "fail":
-            raise RuntimeError(d.get("message", "ip-api returned failure"))
-
-        return GeoResult(
-            ip=d.get("query", ip),
-            country=d.get("country", ""),
-            country_code=d.get("countryCode", ""),
-            region=d.get("regionName", ""),
-            city=d.get("city", ""),
-            zip_code=d.get("zip", ""),
-            latitude=d.get("lat", 0.0),
-            longitude=d.get("lon", 0.0),
-            timezone=d.get("timezone", ""),
-            isp=d.get("isp", ""),
-            org=d.get("org", ""),
-            asn=d.get("as", ""),
-            as_name=d.get("asname", ""),
-            reverse_dns=d.get("reverse", ""),
-            is_proxy=d.get("proxy", False),
-            is_mobile=d.get("mobile", False),
-            is_hosting=d.get("hosting", False),
-            source="ip-api.com",
-        )
-
     def _query_ipapi_co(self, ip):
         url = f"https://ipapi.co/{ip}/json/"
-        resp = self._session.get(url, timeout=self.timeout)
-        d = resp.json()
+        d = self._get_json(url)
 
         if "error" in d:
             raise RuntimeError(d.get("reason", "ipapi.co returned error"))
@@ -216,8 +260,8 @@ class GeoEngine:
             region=d.get("region", ""),
             city=d.get("city", ""),
             zip_code=d.get("postal", ""),
-            latitude=d.get("latitude", 0.0),
-            longitude=d.get("longitude", 0.0),
+            latitude=self._coordinate(d.get("latitude"), -90, 90),
+            longitude=self._coordinate(d.get("longitude"), -180, 180),
             timezone=d.get("timezone", ""),
             isp=d.get("org", ""),
             org=d.get("org", ""),
@@ -227,9 +271,8 @@ class GeoEngine:
         )
 
     def _query_ipwhois(self, ip):
-        url = f"https://ipwhois.app/json/{ip}"
-        resp = self._session.get(url, timeout=self.timeout)
-        d = resp.json()
+        url = f"https://ipwho.is/{ip}"
+        d = self._get_json(url)
 
         if not d.get("success", True):
             raise RuntimeError(d.get("message", "ipwhois returned error"))
@@ -241,14 +284,14 @@ class GeoEngine:
             region=d.get("region", ""),
             city=d.get("city", ""),
             zip_code=d.get("postal", ""),
-            latitude=d.get("latitude", 0.0),
-            longitude=d.get("longitude", 0.0),
-            timezone=d.get("timezone", ""),
-            isp=d.get("isp", ""),
-            org=d.get("org", ""),
-            asn=d.get("asn", ""),
-            as_name=d.get("as", ""),
-            source="ipwhois.app",
+            latitude=self._coordinate(d.get("latitude"), -90, 90),
+            longitude=self._coordinate(d.get("longitude"), -180, 180),
+            timezone=(d.get("timezone") or {}).get("id", ""),
+            isp=(d.get("connection") or {}).get("isp", ""),
+            org=(d.get("connection") or {}).get("org", ""),
+            asn=(d.get("connection") or {}).get("asn", ""),
+            as_name=(d.get("connection") or {}).get("domain", ""),
+            source="ipwho.is",
         )
 
     # traceroute parser

@@ -1,11 +1,11 @@
 """DNS Lookup tab"""
 
 import threading
-import tkinter as tk
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from .theme import COLORS, FONT_FAMILY
+from .ui_dispatcher import UiDispatcher
 from .widgets import (
     OutputConsole,
     ExportBar,
@@ -18,7 +18,7 @@ from netrecon import logger as nr_logger
 log = nr_logger.get_logger("gui.dns")
 
 
-class DNSTab(ctk.CTkFrame):
+class DNSTab(ctk.CTkFrame, UiDispatcher):
 
     def __init__(self, master, status_bar=None, db=None, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
@@ -26,7 +26,10 @@ class DNSTab(ctk.CTkFrame):
         self.db = db
         self.engine = DNSEngine()
         self._last_results = None
+        self._busy = False
+        self._action_buttons = []
         self._build_ui()
+        self._init_ui_dispatcher()
 
     def _build_ui(self):
         # ---- input row ----
@@ -73,9 +76,11 @@ class DNSTab(ctk.CTkFrame):
             ("Zone Transfer", self._on_zone_transfer),
         ]
         for text, cmd in buttons:
-            ctk.CTkButton(
+            button = ctk.CTkButton(
                 btn_frame, text=text, command=cmd, width=130, **btn_style
-            ).pack(side="left", padx=(0, 6))
+            )
+            button.pack(side="left", padx=(0, 6))
+            self._action_buttons.append(button)
 
         # output
         self.console = OutputConsole(self)
@@ -95,11 +100,43 @@ class DNSTab(ctk.CTkFrame):
     # actions
 
     def _run_bg(self, fn, *args):
-        threading.Thread(target=fn, args=args, daemon=True).start()
+        if self._busy:
+            self._set_status("A DNS operation is already running", "warning")
+            return
+        self._set_busy(True)
 
-    def _on_resolve(self):
+        def guarded():
+            try:
+                fn(*args)
+            except Exception as exc:
+                log.exception("Unhandled DNS worker error")
+                self.post_ui(self._background_error, str(exc))
+            finally:
+                self.post_ui(self._set_busy, False)
+
+        threading.Thread(target=guarded, daemon=True).start()
+
+    def _set_busy(self, busy):
+        self._busy = bool(busy)
+        state = "disabled" if self._busy else "normal"
+        for button in self._action_buttons:
+            button.configure(state=state)
+
+    def _background_error(self, message):
+        self.console.clear()
+        self.console.append_line(f"  Error: {message}", "error")
+        self._set_status("DNS operation failed", "error")
+
+    def _require_target(self):
         target = self.target.get()
         if not target:
+            self._set_status("Enter a domain or IP address first", "error")
+            return None
+        return target
+
+    def _on_resolve(self):
+        target = self._require_target()
+        if target is None:
             return
         rtype = self.record_type.get()
         ns = self.dns_server.get() or None
@@ -109,49 +146,65 @@ class DNSTab(ctk.CTkFrame):
             if rtype == "ALL":
                 results = self.engine.get_all_records(target)
                 self._last_results = [r.to_dict() for r in results]
-                self.after(0, self._display_multi_dns, results)
+                self.post_ui(self._display_multi_dns, results)
             else:
                 result = self.engine.resolve(target, rtype, ns)
                 self._last_results = result.to_dict()
-                self.after(0, self._display_dns, result)
-            self.after(0, self._set_status, "Done", "success")
+                self.post_ui(self._display_dns, result)
+            if rtype == "ALL":
+                succeeded = sum(bool(r.records) for r in results)
+                level = "success" if succeeded else "error"
+                message = f"Completed: {succeeded}/{len(results)} record types returned data"
+            else:
+                level = "error" if result.error else "success"
+                message = result.error or "DNS lookup complete"
+            self.post_ui(self._set_status, message, level)
             self._save("DNS Resolve", target, self._last_results)
 
         self._run_bg(task)
 
     def _on_reverse(self):
-        target = self.target.get()
-        if not target:
+        target = self._require_target()
+        if target is None:
             return
         self._set_status(f"Reverse lookup on {target} ...")
 
         def task():
             result = self.engine.reverse_lookup(target)
             self._last_results = result.to_dict()
-            self.after(0, self._display_dns, result)
-            self.after(0, self._set_status, "Done", "success")
+            self.post_ui(self._display_dns, result)
+            self.post_ui(
+                self._set_status,
+                result.error or "Reverse lookup complete",
+                "error" if result.error else "success",
+            )
             self._save("DNS Reverse", target, self._last_results)
 
         self._run_bg(task)
 
     def _on_all_records(self):
-        target = self.target.get()
-        if not target:
+        target = self._require_target()
+        if target is None:
             return
         self._set_status(f"Querying all record types for {target} ...")
 
         def task():
             results = self.engine.get_all_records(target)
             self._last_results = [r.to_dict() for r in results]
-            self.after(0, self._display_multi_dns, results)
-            self.after(0, self._set_status, "Done", "success")
+            self.post_ui(self._display_multi_dns, results)
+            succeeded = sum(bool(r.records) for r in results)
+            self.post_ui(
+                self._set_status,
+                f"Completed: {succeeded}/{len(results)} record types returned data",
+                "success" if succeeded else "error",
+            )
             self._save("DNS All Records", target, self._last_results)
 
         self._run_bg(task)
 
     def _on_propagation(self):
-        target = self.target.get()
-        if not target:
+        target = self._require_target()
+        if target is None:
             return
         rtype = self.record_type.get()
         if rtype == "ALL":
@@ -161,30 +214,40 @@ class DNSTab(ctk.CTkFrame):
         def task():
             results = self.engine.propagation_check(target, rtype)
             self._last_results = [r.to_dict() for r in results]
-            self.after(0, self._display_propagation, results)
-            self.after(0, self._set_status, "Done", "success")
+            self.post_ui(self._display_propagation, results)
+            succeeded = sum(not r.error for r in results)
+            self.post_ui(
+                self._set_status,
+                f"Propagation check: {succeeded}/{len(results)} resolvers replied",
+                "success" if succeeded == len(results) else "warning",
+            )
             self._save("DNS Propagation", target, self._last_results)
 
         self._run_bg(task)
 
     def _on_whois(self):
-        target = self.target.get()
-        if not target:
+        target = self._require_target()
+        if target is None:
             return
         self._set_status(f"WHOIS lookup for {target} ...")
 
         def task():
             result = self.engine.whois_lookup(target)
             self._last_results = result
-            self.after(0, self._display_whois, result)
-            self.after(0, self._set_status, "Done", "success")
+            self.post_ui(self._display_whois, result)
+            error = result.get("error")
+            self.post_ui(
+                self._set_status,
+                error or "WHOIS lookup complete",
+                "error" if error else "success",
+            )
             self._save("WHOIS", target, self._last_results)
 
         self._run_bg(task)
 
     def _on_zone_transfer(self):
-        target = self.target.get()
-        if not target:
+        target = self._require_target()
+        if target is None:
             return
         ns = self.dns_server.get() or None
         self._set_status(f"Attempting zone transfer for {target} ...")
@@ -192,8 +255,13 @@ class DNSTab(ctk.CTkFrame):
         def task():
             result = self.engine.zone_transfer(target, ns)
             self._last_results = result
-            self.after(0, self._display_zone_transfer, result)
-            self.after(0, self._set_status, "Done", "success")
+            self.post_ui(self._display_zone_transfer, result)
+            error = result.get("error")
+            self.post_ui(
+                self._set_status,
+                error or "Zone transfer completed",
+                "warning" if error else "success",
+            )
 
         self._run_bg(task)
 
@@ -223,7 +291,7 @@ class DNSTab(ctk.CTkFrame):
 
     def _display_multi_dns(self, results):
         self.console.clear()
-        self.console.append_line(f"  All Records Query", "header")
+        self.console.append_line("  All Records Query", "header")
         self.console.append_line("")
 
         for result in sorted(results, key=lambda r: r.record_type):

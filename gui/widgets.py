@@ -1,6 +1,5 @@
 """Reusable GUI widgets"""
 
-import tkinter as tk
 import customtkinter as ctk
 from .theme import COLORS, FONT_FAMILY, FONT_MONO
 
@@ -189,13 +188,16 @@ class LabeledDropdown(ctk.CTkFrame):
     ):
         super().__init__(master, fg_color="transparent", **kwargs)
 
-        ctk.CTkLabel(
+        self._command = command
+
+        self.label = ctk.CTkLabel(
             self,
             text=label,
             font=(FONT_FAMILY, 12),
             text_color=COLORS["text_dim"],
             anchor="w",
-        ).pack(anchor="w")
+        )
+        self.label.pack(anchor="w")
 
         self.var = ctk.StringVar(value=default or (values[0] if values else ""))
         self.dropdown = ctk.CTkOptionMenu(
@@ -221,4 +223,9 @@ class LabeledDropdown(ctk.CTkFrame):
         return self.var.get()
 
     def set(self, value):
-        self.var.set(value)
+        # CTkOptionMenu.set() keeps its displayed value and StringVar in sync.
+        # It intentionally does not invoke the menu command, so do that here
+        # for callers that programmatically change a state-driving dropdown.
+        self.dropdown.set(value)
+        if self._command is not None:
+            self._command(value)

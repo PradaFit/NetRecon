@@ -1,10 +1,10 @@
 # NetRecon Privacy Policy
 
 **App:** NetRecon
-**Version:** 2.0.0
+**Version:** 2.0.4
 **Publisher:** PradaFitDev
 **License:** GNU General Public License v3.0 (open source)
-**Effective date:** 2026-05-17
+**Effective date:** 2026-08-23
 
 NetRecon is an open-source desktop and command-line toolkit for DNS
 lookups, port scanning, IP geolocation, and related network
@@ -24,8 +24,9 @@ handles, where it goes, and what it never does.
 - No data is transmitted in the background
 
 NetRecon does not collect personal information about you. It does not
-phone home. It does not run any code on launch other than what is
-needed to render the local user interface.
+phone home. On launch it renders the interface and initializes its local
+preferences, log, and history storage. It makes no network request until
+you trigger a network feature.
 
 ---
 
@@ -77,13 +78,20 @@ and **only for the target you provided**.
 | DNS Lookup | The domain or IP you typed | Your system's DNS resolver, plus optional public resolvers if you enable propagation checks |
 | Reverse DNS | The IP you typed | Your system's DNS resolver |
 | WHOIS | The domain you typed | Public WHOIS servers |
-| IP Geolocation | The IP you typed | Public IP geolocation APIs (multiple providers, with failover) |
+| IP Geolocation | The public IP you typed or the public IP resolved from a domain | `ipwho.is` or `ipapi.co`, over HTTPS, with failover |
+| My Public IP | Your request's source IP, as visible to any internet service | `api.ipify.org`, `ifconfig.me`, or `icanhazip.com`, over HTTPS |
+| Traceroute Map | Standard traceroute probes, then each public hop IP | The target path and the HTTPS geolocation providers above |
 | Port Scan (native) | TCP connect attempts | The target host you specified |
-| Port Scan (Nmap) | Standard Nmap probes | The target host you specified |
+| Port Scan (Nmap standard profiles) | Standard Nmap probes; safe vulnerability profiles exclude external and broadcast scripts | The target host you specified |
+| Port Scan (Nmap extended profiles) | Full Nmap script-category traffic; depending on installed Nmap scripts, this can include local discovery or service metadata | The target, other systems discovered by an eligible broadcast script, or an external service used by an eligible script |
+| Interactive Map | Map tile requests, which reveal the viewer's source IP and visible map area | OpenStreetMap tile servers when you open the generated HTML map |
 
-NetRecon does not send your IP, identity, license key, machine ID, or
-any usage statistics to these services. It only sends the network
-query needed to satisfy the request you made.
+NetRecon does not send an account identity, license key, machine ID, or
+usage statistics to these services. As with any internet request, a
+third-party service can observe the request's source IP. NetRecon sends
+only the query needed to satisfy the feature you selected. Private,
+loopback, reserved, and other non-public addresses are not sent to the
+geolocation providers.
 
 These third-party services have their own privacy policies. NetRecon
 is not affiliated with them.
@@ -93,10 +101,19 @@ is not affiliated with them.
 ## 5. Nmap
 
 Nmap is an **optional** dependency. NetRecon does not bundle or install
-Nmap. If you choose to install Nmap and enable the Nmap path, NetRecon
-will invoke the local `nmap` executable on your machine with a
-validated argument allowlist. Nmap is governed by its own license and
-project policies.
+Nmap. If you choose to install Nmap, NetRecon invokes the local `nmap`
+executable without a command shell. Built-in profiles use fixed arguments,
+and custom arguments pass a strict option allowlist that rejects file I/O,
+proxies, external data files, arbitrary NSE paths, and script arguments.
+The standard Vulnerability Checks and Comprehensive profiles filter their
+NSE selection to scripts tagged safe and exclude scripts tagged external or
+broadcast. Extended Vulnerability Checks and Extended Comprehensive preserve
+the full Nmap `vuln` category for explicitly authorized work orders. The GUI
+shows a detailed confirmation before either extended profile runs. The exact
+behavior of an extended profile depends on the scripts installed with the
+user's local Nmap version and can include intrusive, exploit, denial-of-service,
+broadcast, or external-provider behavior.
+Nmap is governed by its own license and project policies.
 
 ---
 
@@ -108,8 +125,8 @@ responsible for complying with the laws of your jurisdiction and any
 applicable terms of service.
 
 A short responsible-use notice is shown the first time the application
-launches. Continuing past that notice records your acceptance locally
-in `preferences.json`.
+launches and again after a future major-version change. Continuing past
+that notice records your acceptance locally in `preferences.json`.
 
 ---
 

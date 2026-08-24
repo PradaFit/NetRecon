@@ -22,7 +22,7 @@ from .validator import (
     parse_port_list,
 )
 
-__version__ = "2.0.0"
+__version__ = "2.0.4"
 __app_name__ = "NetRecon"
 __author__ = "PradaFit"
 

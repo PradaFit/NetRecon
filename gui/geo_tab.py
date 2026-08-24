@@ -1,10 +1,12 @@
 """Geolocation tab"""
 
 import threading
+from pathlib import Path
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from .theme import COLORS, FONT_FAMILY
+from .ui_dispatcher import UiDispatcher
 from .widgets import (
     OutputConsole,
     ExportBar,
@@ -17,7 +19,7 @@ from netrecon import logger as nr_logger
 log = nr_logger.get_logger("gui.geo")
 
 
-class GeoTab(ctk.CTkFrame):
+class GeoTab(ctk.CTkFrame, UiDispatcher):
 
     def __init__(self, master, status_bar=None, db=None, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
@@ -26,7 +28,10 @@ class GeoTab(ctk.CTkFrame):
         self.engine = GeoEngine()
         self._last_results = None
         self._geo_list = []
+        self._busy = False
+        self._action_buttons = []
         self._build_ui()
+        self._init_ui_dispatcher()
 
     def _build_ui(self):
         # input row
@@ -56,9 +61,11 @@ class GeoTab(ctk.CTkFrame):
             ("Bulk Lookup", self._on_bulk),
         ]
         for text, cmd in buttons:
-            ctk.CTkButton(
+            button = ctk.CTkButton(
                 btn_frame, text=text, command=cmd, width=140, **btn_style
-            ).pack(side="left", padx=(0, 6))
+            )
+            button.pack(side="left", padx=(0, 6))
+            self._action_buttons.append(button)
 
         # info cards frame
         self._cards_frame = ctk.CTkScrollableFrame(
@@ -88,11 +95,43 @@ class GeoTab(ctk.CTkFrame):
     # actions
 
     def _run_bg(self, fn, *args):
-        threading.Thread(target=fn, args=args, daemon=True).start()
+        if self._busy:
+            self._set_status("A geolocation operation is already running", "warning")
+            return
+        self._set_busy(True)
 
-    def _on_locate(self):
+        def guarded():
+            try:
+                fn(*args)
+            except Exception as exc:
+                log.exception("Unhandled geolocation worker error")
+                self.post_ui(self._background_error, str(exc))
+            finally:
+                self.post_ui(self._set_busy, False)
+
+        threading.Thread(target=guarded, daemon=True).start()
+
+    def _set_busy(self, busy):
+        self._busy = bool(busy)
+        state = "disabled" if self._busy else "normal"
+        for button in self._action_buttons:
+            button.configure(state=state)
+
+    def _background_error(self, message):
+        self.console.clear()
+        self.console.append_line(f"  Error: {message}", "error")
+        self._set_status("Geolocation operation failed", "error")
+
+    def _require_target(self):
         target = self.target.get()
         if not target:
+            self._set_status("Enter an IP address or domain first", "error")
+            return None
+        return target
+
+    def _on_locate(self):
+        target = self._require_target()
+        if target is None:
             return
         self._set_status(f"Geolocating {target} ...")
 
@@ -100,8 +139,12 @@ class GeoTab(ctk.CTkFrame):
             result = self.engine.locate(target)
             self._last_results = result.to_dict()
             self._geo_list = [result]
-            self.after(0, self._display_single, result)
-            self.after(0, self._set_status, "Done", "success")
+            self.post_ui(self._display_single, result)
+            self.post_ui(
+                self._set_status,
+                result.error or "Geolocation lookup complete",
+                "error" if result.error else "success",
+            )
             self._save("Geolocation", target, self._last_results)
 
         self._run_bg(task)
@@ -112,20 +155,25 @@ class GeoTab(ctk.CTkFrame):
         def task():
             ip = self.engine.get_my_ip()
             if ip:
-                self.after(0, self.target.set, ip)
+                self.post_ui(self.target.set, ip)
                 result = self.engine.locate(ip)
                 self._last_results = result.to_dict()
                 self._geo_list = [result]
-                self.after(0, self._display_single, result)
-                self.after(0, self._set_status, f"Your public IP: {ip}", "success")
+                self.post_ui(self._display_single, result)
+                self.post_ui(
+                    self._set_status,
+                    result.error or f"Your public IP: {ip}",
+                    "error" if result.error else "success",
+                )
+                self._save("Geolocation", ip, self._last_results)
             else:
-                self.after(0, self._set_status, "Could not detect public IP", "error")
+                self.post_ui(self._set_status, "Could not detect public IP", "error")
 
         self._run_bg(task)
 
     def _on_traceroute(self):
-        target = self.target.get()
-        if not target:
+        target = self._require_target()
+        if target is None:
             return
 
         # One-shot heads-up so the user knows why the button looks idle.
@@ -148,12 +196,12 @@ class GeoTab(ctk.CTkFrame):
             results = self.engine.traceroute_geo(target)
             self._last_results = [r.to_dict() for r in results]
             self._geo_list = results
-            self.after(0, self._display_traceroute, results)
-            self.after(
-                0,
+            self.post_ui(self._display_traceroute, results)
+            succeeded = sum(not result.error for result in results)
+            self.post_ui(
                 self._set_status,
-                f"Traceroute complete: {len(results)} hops",
-                "success",
+                f"Traceroute complete: {succeeded}/{len(results)} hops resolved",
+                "success" if succeeded else "warning",
             )
             self._save("Traceroute Geo", target, self._last_results)
 
@@ -167,8 +215,16 @@ class GeoTab(ctk.CTkFrame):
         if not path:
             return
         try:
-            with open(path, "r") as f:
+            if Path(path).stat().st_size > 1024 * 1024:
+                raise ValueError("Bulk input files are limited to 1 MB")
+            with open(path, "r", encoding="utf-8") as f:
                 targets = [line.strip() for line in f if line.strip()]
+            if not targets:
+                raise ValueError("The selected file contains no targets")
+            if len(targets) > self.engine.MAX_BULK_TARGETS:
+                raise ValueError(
+                    f"Bulk lookup is limited to {self.engine.MAX_BULK_TARGETS} targets"
+                )
         except Exception as e:
             self._set_status(f"Error reading file: {e}", "error")
             return
@@ -179,12 +235,12 @@ class GeoTab(ctk.CTkFrame):
             results = self.engine.bulk_locate(targets)
             self._last_results = [r.to_dict() for r in results]
             self._geo_list = results
-            self.after(0, self._display_bulk, results)
-            self.after(
-                0,
+            self.post_ui(self._display_bulk, results)
+            succeeded = sum(not result.error for result in results)
+            self.post_ui(
                 self._set_status,
-                f"Bulk lookup complete: {len(results)} results",
-                "success",
+                f"Bulk lookup complete: {succeeded}/{len(results)} successful",
+                "success" if succeeded == len(results) else "warning",
             )
 
         self._run_bg(task)
@@ -414,7 +470,12 @@ class GeoTab(ctk.CTkFrame):
             return
         if result:
             self._set_status(f"Map saved to {path}", "success")
-            platform_info.open_file(path)
+            if not platform_info.open_file(path):
+                messagebox.showwarning(
+                    "Map saved",
+                    f"The map was saved, but NetRecon could not open it automatically.\n\n{path}",
+                    parent=self,
+                )
         else:
             messagebox.showwarning(
                 "Map export",

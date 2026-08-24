@@ -13,12 +13,11 @@ Usage:
     python main.py dns example.com --type MX    DNS lookup with record type
     python main.py scan 192.168.1.1             Quick native TCP scan
     python main.py scan 192.168.1.1 --nmap      Quick nmap scan (requires nmap)
-    python main.py scan 192.168.1.0/24 -p quick Scan with profile
+    python main.py scan 192.168.1.0/24 --profile quick --nmap
     python main.py geo 8.8.8.8                  Geolocate an IP
     python main.py geo --myip                   Show your public IP info
 """
 
-import sys
 import argparse
 import json
 
@@ -26,8 +25,6 @@ from netrecon import (
     DNSEngine,
     ScanEngine,
     GeoEngine,
-    ExportEngine,
-    DatabaseManager,
     platform_info,
     RECORD_TYPES,
     SCAN_PROFILES,
@@ -47,7 +44,7 @@ BANNER = r"""
 def _show_banner():
     print(BANNER)
     print(f"  NetRecon v{__version__} | Network Reconnaissance Toolkit")
-    print(f"  by PradaFit")
+    print("  by PradaFit")
     print(f"  Platform: {platform_info.system.title()} {platform_info.release}")
     nmap_ver = platform_info.get_nmap_version()
     if nmap_ver:
@@ -67,7 +64,7 @@ def cli_dns(args):
         results = engine.get_all_records(target)
         for r in sorted(results, key=lambda x: x.record_type):
             _print_dns(r)
-        return
+        return 0 if any(r.records for r in results) else 1
     elif args.propagation:
         results = engine.propagation_check(target, args.type)
         for r in results:
@@ -76,16 +73,17 @@ def cli_dns(args):
             else:
                 vals = ", ".join(rec["value"] for rec in r.records)
                 print(f"  {r.server:<24}  {vals:<30}  {r.response_time_ms} ms")
-        return
+        return 0 if any(not r.error for r in results) else 1
     elif args.whois:
         data = engine.whois_lookup(target)
         print(json.dumps(data, indent=2, default=str))
-        return
+        return 1 if data.get("error") else 0
     else:
         ns = args.server if args.server else None
         result = engine.resolve(target, args.type, ns)
 
     _print_dns(result)
+    return 1 if result.error else 0
 
 
 def cli_scan(args):
@@ -96,14 +94,12 @@ def cli_scan(args):
 
     if use_nmap and not engine.is_available:
         print(f"[!] Nmap not found.\n{platform_info.get_install_instructions()}")
-        sys.exit(1)
+        return 1
 
-    # Default to native scanner unless --nmap flag or nmap profile selected
-    if not use_nmap and not profile.startswith("native_"):
-        if profile in ("quick", "default"):
-            profile = "native_quick"
-        elif profile == "full":
-            profile = "native_full"
+    # --nmap overrides the default native profile without changing explicit
+    # Nmap profile selections.
+    if use_nmap and profile.startswith("native_"):
+        profile = "quick"
 
     def callback(msg):
         print(msg)
@@ -117,7 +113,7 @@ def cli_scan(args):
 
     if result.error:
         print(f"[!] {result.error}")
-        return
+        return 130 if result.cancelled else 1
 
     print(f"\nResults for {result.target} ({result.profile})")
     if result.command_line:
@@ -137,6 +133,7 @@ def cli_scan(args):
             for om in host["os_matches"]:
                 print(f"  OS: {om['name']} ({om['accuracy']}%)")
         print()
+    return 0
 
 
 def cli_geo(args):
@@ -149,14 +146,14 @@ def cli_geo(args):
             target = ip
         else:
             print("[!] Could not detect public IP")
-            return
+            return 1
     else:
         target = args.target
 
     result = engine.locate(target)
     if result.error:
         print(f"[!] {result.error}")
-        return
+        return 1
 
     fields = [
         ("IP", result.ip),
@@ -175,6 +172,7 @@ def cli_geo(args):
     for label, value in fields:
         if value:
             print(f"  {label:<16}  {value}")
+    return 0
 
 
 def cli_interactive():
@@ -345,11 +343,11 @@ def main():
     if args.cli:
         cli_interactive()
     elif args.command == "dns":
-        cli_dns(args)
+        return cli_dns(args)
     elif args.command == "scan":
-        cli_scan(args)
+        return cli_scan(args)
     elif args.command == "geo":
-        cli_geo(args)
+        return cli_geo(args)
     else:
         # Default: launch GUI
         _show_banner()
@@ -357,12 +355,14 @@ def main():
             from gui.app import launch_gui
 
             launch_gui()
+            return 0
         except ImportError as e:
             print(f"[!] GUI dependencies missing: {e}")
             print("    Install with: pip install customtkinter")
             print("    Or run with --cli for terminal mode.")
-            sys.exit(1)
+            return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

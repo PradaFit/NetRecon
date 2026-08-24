@@ -26,6 +26,7 @@ from .validator import (
     sanitize_nameserver,
     InputError,
 )
+from .config import get_section
 
 
 PUBLIC_DNS_SERVERS = {
@@ -64,9 +65,12 @@ class DNSEngine:
     builds a fresh resolver instance, and returns DNSResult objects.
     """
 
-    def __init__(self, timeout=5, lifetime=10):
-        self.timeout = timeout
-        self.lifetime = lifetime
+    def __init__(self, timeout=None, lifetime=None):
+        settings = get_section("dns")
+        self.timeout = max(0.1, float(timeout or settings.get("timeout", 5)))
+        self.lifetime = max(
+            self.timeout, float(lifetime or settings.get("lifetime", 10))
+        )
 
     def _resolver(self, nameserver=None):
         r = dns.resolver.Resolver()
@@ -181,7 +185,7 @@ class DNSEngine:
         try:
             rev = dns.reversename.from_address(ip_address.strip())
             t0 = time.perf_counter()
-            answers = self.resolver.resolve(rev, "PTR")
+            answers = self._resolver().resolve(rev, "PTR")
             elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
             records = [{"value": str(rdata)} for rdata in answers]
             return DNSResult(
@@ -202,9 +206,17 @@ class DNSEngine:
         with ThreadPoolExecutor(max_workers=len(RECORD_TYPES)) as pool:
             futs = {pool.submit(self.resolve, domain, rt): rt for rt in RECORD_TYPES}
             for f in as_completed(futs):
-                result = f.result()
-                if result.records:
-                    out.append(result)
+                record_type = futs[f]
+                try:
+                    out.append(f.result())
+                except Exception as exc:
+                    out.append(
+                        DNSResult(
+                            query=domain,
+                            record_type=record_type,
+                            error=f"Lookup failed: {exc}",
+                        )
+                    )
         return out
 
     def propagation_check(self, domain, record_type="A"):
@@ -215,7 +227,18 @@ class DNSEngine:
                 for name, ip in PUBLIC_DNS_SERVERS.items()
             }
             for f in as_completed(futs):
-                results.append(f.result())
+                server_name = futs[f]
+                try:
+                    results.append(f.result())
+                except Exception as exc:
+                    results.append(
+                        DNSResult(
+                            query=domain,
+                            record_type=record_type,
+                            server=server_name,
+                            error=f"Lookup failed: {exc}",
+                        )
+                    )
         return sorted(results, key=lambda r: r.server)
 
     def bulk_resolve(self, domains, record_type="A"):
@@ -225,7 +248,17 @@ class DNSEngine:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futs = {pool.submit(self.resolve, d, record_type): d for d in clean}
             for f in as_completed(futs):
-                results.append(f.result())
+                domain = futs[f]
+                try:
+                    results.append(f.result())
+                except Exception as exc:
+                    results.append(
+                        DNSResult(
+                            query=domain,
+                            record_type=record_type,
+                            error=f"Lookup failed: {exc}",
+                        )
+                    )
         return results
 
     # zone transfer

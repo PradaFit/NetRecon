@@ -1,23 +1,24 @@
 """
 Native async TCP connect scanner.
 
-Bypasses python-nmap for raw speed on basic port scans.
-Uses asyncio with high concurrency to saturate the link.
-Loosely modeled on RustScan's batching approach -- pure Python,
-no external dependencies, no raw sockets (so no admin required).
-
-Typical throughput on a local /24 with 1000-port sweep: 3-8 seconds.
-Full 65535-port scan on a single host: ~4-12 seconds depending on
-network conditions and configured concurrency.
+Uses a bounded asyncio worker pool for fast single-host TCP connect scans.
+It has no external scanner dependency and needs no raw sockets or elevated
+privileges. Runtime still depends on target responsiveness, network filtering,
+the selected port count, timeout, and concurrency.
 """
 
 import asyncio
+import ipaddress
 import socket
+import threading
 import time
 from dataclasses import dataclass, field
 
-from .validator import sanitize_target, parse_port_list, resolve_to_ip, InputError
+from .logger import get_logger
+from .validator import sanitize_target, parse_port_list, InputError
 
+
+log = get_logger("native_scan")
 
 # well-known service map (subset covers 95% of real-world hits)
 
@@ -117,25 +118,28 @@ TOP_1000 = sorted(
     [
         1,
         3,
-        5,
+        4,
+        6,
         7,
         9,
         13,
         17,
         19,
+        20,
         21,
         22,
         23,
+        24,
         25,
         26,
+        30,
+        32,
+        33,
         37,
         42,
         43,
         49,
         53,
-        67,
-        68,
-        69,
         70,
         79,
         80,
@@ -353,14 +357,31 @@ TOP_1000 = sorted(
         1111,
         1112,
         1113,
+        1114,
         1117,
         1119,
         1121,
         1122,
+        1123,
+        1124,
+        1126,
+        1130,
         1131,
+        1132,
+        1137,
         1138,
+        1141,
+        1145,
+        1147,
         1148,
+        1149,
+        1151,
         1152,
+        1154,
+        1163,
+        1164,
+        1165,
+        1166,
         1169,
         1174,
         1175,
@@ -549,9 +570,7 @@ TOP_1000 = sorted(
         3003,
         3005,
         3006,
-        3007,
         3011,
-        3013,
         3017,
         3030,
         3031,
@@ -694,7 +713,6 @@ TOP_1000 = sorted(
         5631,
         5633,
         5666,
-        5672,
         5678,
         5679,
         5718,
@@ -756,7 +774,6 @@ TOP_1000 = sorted(
         6129,
         6156,
         6346,
-        6379,
         6389,
         6502,
         6510,
@@ -1026,6 +1043,7 @@ TOP_1000 = sorted(
         32782,
         32783,
         32784,
+        32785,
         33354,
         33899,
         34571,
@@ -1119,6 +1137,7 @@ class NativeScanResult:
     scan_time: float = 0.0
     total_scanned: int = 0
     error: str = ""
+    cancelled: bool = False
 
     @property
     def open_ports(self):
@@ -1143,55 +1162,95 @@ class AsyncPortScanner:
       2. Split port list into batches (bounded by semaphore)
       3. Fire off TCP connect() calls concurrently via asyncio
       4. Collect results, optionally grab banners on open ports
-      5. Track memory usage, bail if approaching the cap
+      5. Keep task count bounded so full-range scans do not allocate per-port tasks
     """
 
-    DEFAULT_CONCURRENCY = 8000
-    MAX_CONCURRENCY = 50000  # safety ceiling
+    DEFAULT_CONCURRENCY = 4000
+    MAX_CONCURRENCY = 8000  # practical Windows socket/task safety ceiling
     DEFAULT_TIMEOUT = 1.5  # seconds per connect attempt
-    BANNER_TIMEOUT = 2.0  # seconds to wait for a banner read
-    MEMORY_CAP_MB = 14000  # leave headroom under 15GB
+    BANNER_TIMEOUT = 0.75  # seconds to wait for an unsolicited banner
 
     def __init__(
         self,
         concurrency=None,
         connect_timeout=None,
         grab_banners=True,
-        memory_cap_mb=None,
     ):
-        self._concurrency = min(
-            concurrency or self.DEFAULT_CONCURRENCY,
-            self.MAX_CONCURRENCY,
-        )
-        self._connect_timeout = connect_timeout or self.DEFAULT_TIMEOUT
+        requested_concurrency = int(concurrency or self.DEFAULT_CONCURRENCY)
+        if requested_concurrency < 1:
+            raise ValueError("Concurrency must be at least 1")
+        self._concurrency = min(requested_concurrency, self.MAX_CONCURRENCY)
+        self._connect_timeout = float(connect_timeout or self.DEFAULT_TIMEOUT)
+        if self._connect_timeout <= 0:
+            raise ValueError("Connect timeout must be greater than zero")
         self._grab_banners = grab_banners
-        self._memory_cap = (memory_cap_mb or self.MEMORY_CAP_MB) * 1024 * 1024  # bytes
-        self._cancelled = False
+        self._cancel_event = threading.Event()
         self._scanned_count = 0
+        self._state_lock = threading.Lock()
+        self._loop = None
+        self._active_tasks = set()
 
     def cancel(self):
-        self._cancelled = True
+        """Request cancellation and immediately wake in-flight asyncio probes."""
+        self._cancel_event.set()
+        with self._state_lock:
+            loop = self._loop
+        if loop and loop.is_running():
+            try:
+                loop.call_soon_threadsafe(self._cancel_active_tasks)
+            except RuntimeError:
+                pass
 
     def reset(self):
-        self._cancelled = False
+        self._cancel_event.clear()
         self._scanned_count = 0
+
+    @property
+    def cancelled(self):
+        return self._cancel_event.is_set()
+
+    def _cancel_active_tasks(self):
+        for task in tuple(self._active_tasks):
+            if not task.done():
+                task.cancel()
+
+    def _set_active_tasks(self, tasks):
+        self._active_tasks = set(tasks)
 
     # public entry points
 
-    def scan(self, target, ports=None, port_spec=None, callback=None):
+    def scan(
+        self,
+        target,
+        ports=None,
+        port_spec=None,
+        callback=None,
+        reset_cancel=True,
+    ):
         """
         Synchronous wrapper around the async scanner.
         Use this from threads / non-async code (the GUI, CLI, etc.).
         """
-        self.reset()
+        if reset_cancel:
+            self.reset()
+        loop = asyncio.new_event_loop()
+        with self._state_lock:
+            self._loop = loop
         try:
-            loop = asyncio.new_event_loop()
             result = loop.run_until_complete(
                 self.scan_async(
                     target, ports=ports, port_spec=port_spec, callback=callback
                 )
             )
         finally:
+            pending = asyncio.all_tasks(loop)
+            for task in pending:
+                task.cancel()
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            with self._state_lock:
+                self._loop = None
+            self._active_tasks.clear()
             loop.close()
         return result
 
@@ -1208,7 +1267,7 @@ class AsyncPortScanner:
         t0 = time.perf_counter()
 
         try:
-            ip = await self._resolve_async(target)
+            ip, family = await self._resolve_async(target)
         except InputError as exc:
             return NativeScanResult(target=target, ip="", error=str(exc))
 
@@ -1216,7 +1275,14 @@ class AsyncPortScanner:
         if ports:
             if isinstance(ports, str):
                 ports = parse_port_list(ports)
-            port_list = sorted(set(int(p) for p in ports))
+            try:
+                port_list = sorted(set(int(p) for p in ports))
+            except (TypeError, ValueError):
+                return NativeScanResult(target=target, ip=ip, error="Invalid port list")
+            if any(port < 1 or port > 65535 for port in port_list):
+                return NativeScanResult(
+                    target=target, ip=ip, error="Ports must be in the range 1-65535"
+                )
         elif port_spec:
             try:
                 port_list = parse_port_list(port_spec)
@@ -1226,41 +1292,62 @@ class AsyncPortScanner:
             port_list = list(TOP_1000)
 
         total = len(port_list)
+        if total == 0:
+            return NativeScanResult(target=target, ip=ip, error="No ports selected")
         if callback:
             callback(
                 f"  Scanning {ip} -- {total} ports, concurrency={self._concurrency}"
             )
 
-        sem = asyncio.Semaphore(self._concurrency)
         results = []
-
-        # create tasks in one shot
-        tasks = [self._probe_with_sem(ip, port, sem) for port in port_list]
-
         done_count = 0
         last_pct = -1
-        for coro in asyncio.as_completed(tasks):
-            if self._cancelled:
-                break
-            pr = await coro
-            results.append(pr)
-            done_count += 1
+        open_count = 0
+        port_iterator = iter(port_list)
 
-            pct = (done_count * 100) // total
-            if callback and pct != last_pct and pct % 5 == 0:
-                open_so_far = sum(1 for r in results if r.state == "open")
-                callback(
-                    f"  [{pct:3d}%] {done_count}/{total} probed -- {open_so_far} open"
-                )
-                last_pct = pct
+        async def worker():
+            nonlocal done_count, last_pct, open_count
+            while not self.cancelled:
+                try:
+                    port = next(port_iterator)
+                except StopIteration:
+                    return
+                try:
+                    pr = await self._probe_port(ip, port, family)
+                except asyncio.CancelledError:
+                    return
+                results.append(pr)
+                done_count += 1
+                self._scanned_count = done_count
+                if pr.state == "open":
+                    open_count += 1
+
+                pct = (done_count * 100) // total
+                if callback and pct != last_pct and pct % 5 == 0:
+                    callback(
+                        f"  [{pct:3d}%] {done_count}/{total} probed -- "
+                        f"{open_count} open"
+                    )
+                    last_pct = pct
+
+        worker_count = min(self._concurrency, total)
+        tasks = [asyncio.create_task(worker()) for _ in range(worker_count)]
+        self._set_active_tasks(tasks)
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self._active_tasks.clear()
 
         # optionally grab banners on open ports
-        if self._grab_banners and not self._cancelled:
+        if self._grab_banners and not self.cancelled:
             open_results = [r for r in results if r.state == "open"]
             if open_results and callback:
                 callback(f"  Grabbing banners on {len(open_results)} open ports ...")
-            banner_tasks = [self._banner_grab(ip, r.port) for r in open_results]
+            banner_tasks = [
+                asyncio.create_task(self._banner_grab(ip, r.port, family))
+                for r in open_results
+            ]
+            self._set_active_tasks(banner_tasks)
             banners = await asyncio.gather(*banner_tasks, return_exceptions=True)
+            self._active_tasks.clear()
             banner_map = {}
             for b in banners:
                 if isinstance(b, tuple):
@@ -1274,46 +1361,56 @@ class AsyncPortScanner:
 
         elapsed = round(time.perf_counter() - t0, 3)
         if callback:
-            open_count = sum(1 for r in results if r.state == "open")
-            callback(
-                f"  Scan finished: {open_count} open / {total} checked in {elapsed}s"
-            )
+            if self.cancelled:
+                callback(f"  Scan cancelled after {done_count}/{total} ports")
+            else:
+                callback(
+                    f"  Scan finished: {open_count} open / {done_count} checked "
+                    f"in {elapsed}s"
+                )
 
         return NativeScanResult(
             target=target,
             ip=ip,
             ports=results,
             scan_time=elapsed,
-            total_scanned=total,
+            total_scanned=done_count,
+            error="Scan cancelled by user" if self.cancelled else "",
+            cancelled=self.cancelled,
         )
 
     async def _resolve_async(self, target):
         """Resolve target to an IP without blocking the event loop."""
         cleaned = sanitize_target(target)
+        if "/" in cleaned:
+            raise InputError(
+                "Native profiles scan one host at a time; use an Nmap profile for CIDR targets"
+            )
         try:
-            socket.inet_aton(cleaned)
-            return cleaned
-        except OSError:
+            address = ipaddress.ip_address(cleaned)
+            family = socket.AF_INET6 if address.version == 6 else socket.AF_INET
+            return str(address), family
+        except ValueError:
             pass
         loop = asyncio.get_running_loop()
         try:
-            infos = await loop.getaddrinfo(cleaned, None, family=socket.AF_INET)
-        except socket.gaierror:
+            infos = await asyncio.wait_for(
+                loop.getaddrinfo(cleaned, None, family=socket.AF_UNSPEC), timeout=5.0
+            )
+        except (socket.gaierror, asyncio.TimeoutError):
             raise InputError(f"Cannot resolve hostname: {cleaned}")
         if not infos:
             raise InputError(f"Cannot resolve hostname: {cleaned}")
-        return infos[0][4][0]
+        infos.sort(key=lambda info: 0 if info[0] == socket.AF_INET else 1)
+        family = infos[0][0]
+        return infos[0][4][0], family
 
-    async def _probe_with_sem(self, ip, port, sem):
-        async with sem:
-            return await self._probe_port(ip, port)
-
-    async def _probe_port(self, ip, port):
+    async def _probe_port(self, ip, port, family):
         """Single TCP connect probe."""
         svc = SERVICE_MAP.get(port, "")
         t0 = time.perf_counter()
 
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock = socket.socket(family, socket.SOCK_STREAM)
         sock.setblocking(False)
 
         loop = asyncio.get_running_loop()
@@ -1334,11 +1431,11 @@ class AsyncPortScanner:
         finally:
             sock.close()
 
-    async def _banner_grab(self, ip, port):
+    async def _banner_grab(self, ip, port, family):
         """Try reading the first chunk of data from an open port."""
         try:
             reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(ip, port),
+                asyncio.open_connection(ip, port, family=family),
                 timeout=self.BANNER_TIMEOUT,
             )
             # some services send a banner immediately, others need a nudge
@@ -1353,7 +1450,7 @@ class AsyncPortScanner:
                 try:
                     data = await asyncio.wait_for(
                         reader.read(1024),
-                        timeout=1.0,
+                        timeout=0.5,
                     )
                 except asyncio.TimeoutError:
                     data = b""
@@ -1361,8 +1458,8 @@ class AsyncPortScanner:
             writer.close()
             try:
                 await writer.wait_closed()
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Banner socket close failed: %s", type(exc).__name__)
 
             banner_text = data.decode("utf-8", errors="replace").strip()
             if len(banner_text) > 256:

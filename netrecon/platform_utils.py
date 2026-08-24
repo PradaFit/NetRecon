@@ -2,8 +2,14 @@ import os
 import sys
 import ctypes
 import shutil
-import subprocess
+# Required for fixed local utility commands that never invoke a shell.
+import subprocess  # nosec B404
 import platform as _platform
+
+from .logger import get_logger
+
+
+log = get_logger("platform")
 
 
 class PlatformInfo:
@@ -71,15 +77,15 @@ class PlatformInfo:
         if not nmap_path:
             return None
         try:
-            out = subprocess.check_output(
+            out = subprocess.check_output(  # nosec
                 [nmap_path, "--version"], stderr=subprocess.STDOUT, timeout=5
             ).decode("utf-8", errors="replace")
             for line in out.splitlines():
                 if "nmap" in line.lower():
                     self._nmap_version = line.strip()
                     return self._nmap_version
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Could not read Nmap version: %s", type(exc).__name__)
         return None
 
     def get_install_instructions(self):
@@ -134,8 +140,8 @@ class PlatformInfo:
                     for line in f:
                         if line.startswith("VmRSS:"):
                             return int(line.split()[1]) / 1024
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Could not read process memory: %s", type(exc).__name__)
         return 0.0
 
     @staticmethod
@@ -166,19 +172,20 @@ class PlatformInfo:
                     for line in f:
                         if line.startswith("MemTotal:"):
                             return int(line.split()[1]) / 1024
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Could not read system memory: %s", type(exc).__name__)
         return 0.0
 
     def open_file(self, filepath):
         filepath = str(filepath)
         try:
             if self.is_windows:
-                os.startfile(filepath)
+                # Open an explicitly selected local export with its associated app.
+                os.startfile(filepath)  # nosec B606
             elif self.is_mac:
-                subprocess.Popen(["open", filepath])
+                subprocess.Popen(["open", filepath])  # nosec B603 B607
             else:
-                subprocess.Popen(["xdg-open", filepath])
+                subprocess.Popen(["xdg-open", filepath])  # nosec B603 B607
             return True
         except Exception:
             return False

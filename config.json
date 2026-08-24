@@ -1,6 +1,6 @@
 {
     "app_name": "NetRecon",
-    "version": "2.0.0",
+    "version": "2.0.4",
     "dns": {
         "timeout": 5,
         "lifetime": 10,
@@ -8,17 +8,15 @@
     },
     "scan": {
         "default_profile": "native_quick",
-        "default_timing": "T3",
-        "native_concurrency": 1500,
+        "default_timing": "Profile default",
+        "native_concurrency": 4000,
         "native_timeout": 1.5,
-        "memory_cap_mb": 14000
+        "nmap_stats_interval": "1s",
+        "nmap_host_timeout": "30m",
+        "nmap_script_timeout": "5m"
     },
     "geo": {
-        "timeout": 10,
-        "preferred_provider": null
-    },
-    "export": {
-        "default_directory": "~/netrecon_exports"
+        "timeout": 10
     },
     "database": {
         "path": null

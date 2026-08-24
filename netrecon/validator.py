@@ -14,7 +14,7 @@ _DOMAIN_RE = re.compile(
     r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63})*\.[A-Za-z]{2,}$"
 )
 _PORT_RANGE_RE = re.compile(r"^(\d{1,5}(-\d{1,5})?,?\s*)+$")
-_SAFE_NMAP_RE = re.compile(r"^[A-Za-z0-9\s\-./,:=_]+$")
+_SAFE_NMAP_RE = re.compile(r"^[A-Za-z0-9\s\-.,:=_]+$")
 
 
 class InputError(ValueError):
@@ -99,8 +99,11 @@ def sanitize_port_spec(raw):
 
 def sanitize_nmap_args(raw):
     """
-    Allow only safe characters in custom nmap arguments.
-    Blocks shell metacharacters and known-dangerous flags.
+    Validate custom Nmap arguments against a deliberately small allowlist.
+
+    Nmap is launched without a shell, but restricting options also prevents
+    local file reads/writes, proxying, external data files, and arbitrary NSE
+    script paths from being introduced through the GUI.
     """
     if not raw:
         return None
@@ -109,25 +112,94 @@ def sanitize_nmap_args(raw):
     if not _SAFE_NMAP_RE.match(cleaned):
         raise InputError("Nmap arguments contain disallowed characters")
 
-    blocked_patterns = [
-        "--script-args",
-        "-oN",
-        "-oX",
-        "-oG",
-        "-oA",
-        "--resume",
-        "-iL",
-        "-iR",
-        "--datadir",
-        "--servicedb",
-        "--versiondb",
-    ]
-    lowered = cleaned.lower()
-    for bp in blocked_patterns:
-        if bp.lower() in lowered:
-            raise InputError(f"Nmap argument '{bp}' is restricted for security")
+    tokens = cleaned.split()
+    flag_options = {
+        "-sS",
+        "-sT",
+        "-sU",
+        "-sV",
+        "-sC",
+        "-sn",
+        "-O",
+        "-A",
+        "-F",
+        "-Pn",
+        "-n",
+        "-R",
+        "-6",
+        "--open",
+        "--reason",
+        "--osscan-guess",
+        "--osscan-limit",
+        "--version-light",
+        "--version-all",
+    }
+    value_options = {
+        "-p",
+        "--top-ports",
+        "--version-intensity",
+        "--max-retries",
+        "--host-timeout",
+        "--script-timeout",
+        "--script",
+    }
 
-    return cleaned
+    def validate_value(option, value):
+        if option == "-p":
+            if value == "-":
+                return
+            sanitize_port_spec(value)
+        elif option == "--top-ports":
+            if not value.isdigit() or not 1 <= int(value) <= 65535:
+                raise InputError("--top-ports must be between 1 and 65535")
+        elif option == "--version-intensity":
+            if not value.isdigit() or not 0 <= int(value) <= 9:
+                raise InputError("--version-intensity must be between 0 and 9")
+        elif option == "--max-retries":
+            if not value.isdigit() or not 0 <= int(value) <= 10:
+                raise InputError("--max-retries must be between 0 and 10")
+        elif option in {"--host-timeout", "--script-timeout"}:
+            if not re.fullmatch(r"\d+(?:ms|s|m|h)?", value):
+                raise InputError(f"{option} must be a number with ms, s, m, or h")
+        elif option == "--script":
+            categories = value.split(",")
+            if not categories or any(
+                category not in {"default", "safe", "vuln"}
+                for category in categories
+            ):
+                raise InputError(
+                    "--script is limited to the default, safe, and vuln categories"
+                )
+
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in flag_options or re.fullmatch(r"-T[0-5]", token):
+            index += 1
+            continue
+        if token in value_options:
+            if index + 1 >= len(tokens):
+                raise InputError(f"Nmap argument '{token}' requires a value")
+            validate_value(token, tokens[index + 1])
+            index += 2
+            continue
+        matched = False
+        for option in value_options:
+            prefix = option + "="
+            if token.startswith(prefix):
+                validate_value(option, token[len(prefix) :])
+                matched = True
+                break
+        if matched:
+            index += 1
+            continue
+        if token.startswith("-p") and len(token) > 2:
+            validate_value("-p", token[2:])
+            index += 1
+            continue
+        raise InputError(f"Nmap argument '{token}' is not in the safe allowlist")
+
+    return " ".join(tokens)
 
 
 def sanitize_dns_type(raw):

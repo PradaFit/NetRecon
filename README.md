@@ -2,7 +2,7 @@
 
 > **Now on the Microsoft Store:** [NetRecon Network Toolkit](https://apps.microsoft.com/store/detail/9N0FM1DQSB34?cid=DevShareMCLPCS) - one-click install, automatic updates, no command line required.
 
-NetRecon is a Python network reconnaissance toolkit built for fast DNS lookups, async TCP port scanning, optional Nmap-driven enumeration, IP geolocation, and exportable scan history. It ships with a desktop GUI and a CLI, runs on Windows, Linux, and macOS, and does not require Nmap for core scanning.
+NetRecon is a Python network reconnaissance toolkit built for fast DNS lookups, async TCP port scanning, optional Nmap-driven enumeration, IP geolocation, and exportable scan history. The project includes a desktop GUI and a CLI, runs on Windows, Linux, and macOS, and does not require Nmap for core scanning.
 
 Intended for authorized network diagnostics, DNS verification, internal network checks, and security testing on systems you own or are explicitly permitted to assess.
 
@@ -15,9 +15,9 @@ Developed by PradaFit.
 **NetRecon Network Toolkit** is the official Microsoft Store edition of NetRecon, published by PradaFitDev.
 
 - Store listing: https://apps.microsoft.com/store/detail/9N0FM1DQSB34?cid=DevShareMCLPCS
-- One-click install on Windows 10 (1809+) and Windows 11, x64 and ARM64
+- One-click install on Windows 10 (1809+) and Windows 11, x64
 - Automatic updates through the Microsoft Store
-- Signed and certified by Microsoft, runs inside the standard MSIX app container
+- Available through the Microsoft Store as a full-trust packaged desktop app
 
 The GitHub releases page continues to host the standalone Inno Setup installer (`NetRecon-Setup-*.exe`) and the source distribution for users who prefer manual install, portable use, or building from source. Both editions share the same engine, feature set, and local-first design.
 
@@ -65,7 +65,7 @@ The GUI includes dedicated tabs for:
 
 A built-in **About** window (top-right corner of the main window) exposes the project links, the responsible-use notice, the licence, and a one-click **Export Diagnostic Log** action that produces a sanitized text file for bug reports.
 
-On first launch the GUI shows a short **Responsible Use** notice that must be accepted before the app continues. Acceptance is stored locally and the notice does not re-appear on subsequent launches.
+On first launch the GUI shows a short **Responsible Use** notice that must be accepted before the app continues. Acceptance is stored locally and is requested again only after a future major-version change.
 
 ## Native Scanner and Nmap Support
 
@@ -73,20 +73,43 @@ NetRecon supports two scanning paths.
 
 ### Native Scanner
 
-The built-in scanner is the default path and is designed for speed. It uses async TCP connections, supports custom port selections, and avoids the common problem of a GUI tool becoming unusable on machines where Nmap is missing.
+The built-in scanner is the default path and is designed for fast, single-host checks. It uses a bounded async TCP worker pool, supports IPv4, IPv6, hostnames, and custom port selections, and remains available when Nmap is missing. CIDR ranges use an Nmap profile.
 
 Default configuration:
 
 - `native_quick` profile by default
-- GUI Speed dropdown with four tiers: **Safe (500)**, **Balanced (1500)** (default), **Fast (4000)**, **Extreme (8000)**. The Extreme tier requires explicit confirmation.
+- The active **Native Scan Speed** selector has four tiers: **Safe (500)**, **Balanced (1500)**, **Fast (4000)** (default), and **Extreme (8000)**. The Extreme tier requires explicit confirmation.
 - `1.5s` connect timeout
-- Configurable memory cap safeguards
+- Bounded task creation instead of allocating one async task per port
+- Immediate cancellation of active probes and banner reads
 
 ### Nmap Integration
 
 If Nmap is installed and available in `PATH`, NetRecon can switch to Nmap-backed profiles for users who want deeper service detection or traditional Nmap output behavior.
 
 If Nmap is not installed, NetRecon still remains fully usable for its core scanning workflow.
+
+Nmap profiles are launched as a directly managed local process. The Cancel button terminates that process immediately. When an Nmap profile is active, the UI displays **Nmap Scan Speed** instead of the native concurrency selector. It defaults to the profile's timing and can be explicitly overridden. Switching back to a native profile restores the enabled native speed selector.
+
+Nmap status records are streamed into the live progress bar with the current phase, percentage when Nmap provides one, and elapsed time. Built-in scans use a 30-minute per-host ceiling and a 5-minute per-script ceiling. The explicitly labeled extended profiles use 60-minute host and 15-minute script ceilings. Custom authorized commands can select different limits. If a Ports value is supplied, it overrides profile-wide choices such as `-F`, `--top-ports`, or `-p-`.
+
+| Profile | Intended behavior |
+|---|---|
+| Quick Scan | Nmap's most common 100 TCP ports |
+| Default Scan | Default TCP ports with service detection |
+| Intense Scan | All TCP ports with service, OS, script, and route detection |
+| SYN Scan | TCP SYN scan with conservative timing |
+| UDP Scan | Nmap's 100 most common UDP ports |
+| Vulnerability Checks | Service detection plus safe, target-scoped vulnerability scripts |
+| Extended Vulnerability Checks | Full `vuln` category for explicitly authorized work orders; confirmation required in the GUI |
+| Ping Sweep | Host discovery only |
+| OS Detection | Operating-system fingerprinting |
+| Service Version | Detailed service/version detection |
+| Comprehensive | All TCP ports with detection and safe, target-scoped scripts |
+| Extended Comprehensive | All TCP ports plus full default and `vuln` categories; confirmation required in the GUI |
+| Native Quick | Top 1000 TCP ports on one host |
+| Native Full Range | All 65535 TCP ports on one host |
+| Native Custom | User-selected TCP ports on one host |
 
 ## DNS Toolkit
 
@@ -103,7 +126,7 @@ This makes it useful for routine DNS troubleshooting, domain recon, and quick ve
 
 ## Geolocation
 
-The geo engine can resolve public IP metadata including location, ISP, ASN, and reverse DNS details when available. It uses multiple providers with failover behavior instead of relying on a single endpoint.
+The geo engine can resolve public IP metadata including location, ISP, ASN, and reverse DNS details when available. It uses HTTPS-only providers with failover behavior. Private, loopback, reserved, and other non-public addresses are rejected before a provider request.
 
 ## Export and History
 
@@ -121,7 +144,7 @@ This is useful if you want one tool for both collection and handoff.
 
 ### Option A: Windows Installer
 
-Download the latest `NetRecon-Setup-*.exe` from the Releases page (or install from the Microsoft Store) and run it. The installer supports Windows 10 (1809+) and Windows 11 on x64 and ARM64, creates Start Menu and optional desktop shortcuts, and preserves user data under `%USERPROFILE%\.netrecon` across upgrades and uninstalls.
+Download the latest `NetRecon-Setup-*.exe` from the Releases page (or install from the Microsoft Store) and run it. The installer supports Windows 10 (1809+) and Windows 11 on x64, creates Start Menu and optional desktop shortcuts, and preserves user data under `%USERPROFILE%\.netrecon` across upgrades and uninstalls.
 
 ### Option B: From Source
 
@@ -163,13 +186,14 @@ python main.py dns example.com --type MX
 
 ```bash
 python main.py scan 192.168.1.1
-python main.py scan 192.168.1.0/24 -p quick
+python main.py scan 192.168.1.1 --profile native_custom --ports 22,80,443
 ```
 
 ### Nmap-backed scan
 
 ```bash
 python main.py scan 192.168.1.1 --nmap
+python main.py scan 192.168.1.0/24 --profile quick --nmap
 ```
 
 ### IP geolocation
@@ -190,8 +214,10 @@ python main.py geo --myip
 
 NetRecon includes input validation and defensive handling in the core engines.
 
-- target and port input sanitization with strict IPv4, IPv6, CIDR, and hostname rules
-- Nmap argument allowlist that blocks file-include, output redirection, custom data dirs, and resume flags (`-iL`, `-iR`, `--datadir`, `--servicedb`, `--versiondb`, `-oN/-oX/-oG/-oA`, `--resume`, `--script-args`)
+- target and port input validation for IPv4, IPv6, CIDR, and hostnames; native profiles intentionally accept one host while Nmap profiles accept CIDR
+- a strict custom Nmap option allowlist; file inputs/outputs, proxies, external data files, resume, arbitrary NSE paths, and script arguments are rejected
+- safe built-in vulnerability profiles exclude scripts tagged external or broadcast; full-category extended profiles remain available behind an explicit scope warning for authorized work orders
+- bounded Nmap host/script execution with live phase and timing updates
 - export paths sandboxed to home, temp, and working directory roots using real-path containment checks
 - SQLite connections wrapped with `contextlib.closing` and parameterized queries throughout
 - HTML escaping in report generation
@@ -223,7 +249,7 @@ This does not make reckless scanning safe. It means the application is not casua
 
 ## Privacy
 
-NetRecon does not include telemetry, analytics, or third-party trackers. Scan results, history, preferences, and diagnostic logs are stored locally under `%USERPROFILE%\.netrecon` on Windows or `~/.netrecon` elsewhere. Geolocation lookups are sent to public IP lookup APIs only when you run one, and only contain the IP you provided.
+NetRecon does not include telemetry, analytics, or third-party trackers. Scan results, history, preferences, and diagnostic logs are stored locally under `%USERPROFILE%\.netrecon` on Windows or `~/.netrecon` elsewhere. Geolocation lookups and traceroute-hop geolocation send public IP addresses to the documented HTTPS providers only when you run those features. Interactive maps load OpenStreetMap tiles when opened.
 
 ## Legal and Responsible Use
 

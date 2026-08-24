@@ -9,6 +9,10 @@ build/
 *.db-shm
 .env
 .venv/
+.pytest_cache/
+_verification/
+_Refs/
+.github/instructions/
 venv/
 env/
 *.log

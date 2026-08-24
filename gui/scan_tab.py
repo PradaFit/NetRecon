@@ -2,10 +2,12 @@
 
 import re
 import threading
+import time
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from .theme import COLORS, FONT_FAMILY
+from .ui_dispatcher import UiDispatcher
 from .widgets import (
     OutputConsole,
     ExportBar,
@@ -14,6 +16,7 @@ from .widgets import (
 )
 from netrecon import ScanEngine, ExportEngine, SCAN_PROFILES
 from netrecon.platform_utils import platform_info
+from netrecon.config import get_section
 from netrecon import logger as nr_logger
 
 log = nr_logger.get_logger("gui.scan")
@@ -28,19 +31,26 @@ SPEED_TIERS = {
     "Fast (4000)": 4000,
     "Extreme (8000)": 8000,
 }
-DEFAULT_SPEED = "Balanced (1500)"
+DEFAULT_SPEED = "Fast (4000)"
+SCAN_PROGRESS_RE = re.compile(r"\[\s*(\d+(?:\.\d+)?)%\]\s*(.*)")
 
 
-class ScanTab(ctk.CTkFrame):
+class ScanTab(ctk.CTkFrame, UiDispatcher):
 
     def __init__(self, master, status_bar=None, db=None, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
         self.status = status_bar
         self.db = db
+        self._settings = get_section("scan")
         self.engine = ScanEngine()
         self._last_result = None
         self._scanning = False
+        self._scan_started_at = None
+        self._progress_percent = None
+        self._progress_detail = ""
+        self._last_console_progress_bucket = None
         self._build_ui()
+        self._init_ui_dispatcher()
 
     def _build_ui(self):
         # availability banner
@@ -75,7 +85,7 @@ class ScanTab(ctk.CTkFrame):
         row1.pack(fill="x", padx=10, pady=(6, 2))
 
         self.target = LabeledEntry(
-            row1, "Target (IP / Host / CIDR)", "192.168.1.0/24", width=260
+            row1, "Target (IP / Host / CIDR)", "192.168.1.10", width=260
         )
         self.target.pack(side="left", padx=(0, 8))
 
@@ -86,30 +96,51 @@ class ScanTab(ctk.CTkFrame):
 
         profile_names = [SCAN_PROFILES[k]["name"] for k in SCAN_PROFILES]
         self._profile_keys = list(SCAN_PROFILES.keys())
+        default_profile = self._settings.get("default_profile", "native_quick")
+        if default_profile not in SCAN_PROFILES:
+            default_profile = "native_quick"
         self.profile = LabeledDropdown(
             row1,
             "Scan Profile",
             profile_names,
-            default=SCAN_PROFILES["native_quick"]["name"],
+            default=SCAN_PROFILES[default_profile]["name"],
             width=200,
             command=self._on_profile_change,
         )
         self.profile.pack(side="left", padx=(0, 8))
 
-        timing_values = [f"T{i}" for i in range(6)]
-        self.timing = LabeledDropdown(
-            row1, "Timing (nmap)", timing_values, default="T3", width=100
-        )
-        self.timing.pack(side="left", padx=(0, 8))
+        timing_values = ["Profile default"] + [f"T{i}" for i in range(6)]
+        default_timing = self._settings.get("default_timing", "Profile default")
+        if default_timing not in timing_values:
+            default_timing = "Profile default"
+        self.speed_slot = ctk.CTkFrame(row1, fg_color="transparent")
+        self.speed_slot.pack(side="left", padx=(0, 8))
 
-        self.speed = LabeledDropdown(
-            row1,
-            "Speed (native)",
-            list(SPEED_TIERS.keys()),
-            default=DEFAULT_SPEED,
+        self.timing = LabeledDropdown(
+            self.speed_slot,
+            "Nmap Scan Speed",
+            timing_values,
+            default=default_timing,
             width=150,
         )
-        self.speed.pack(side="left", padx=(0, 8))
+
+        try:
+            configured_concurrency = int(
+                self._settings.get("native_concurrency", 1500)
+            )
+        except (TypeError, ValueError):
+            configured_concurrency = 4000
+        default_speed = min(
+            SPEED_TIERS,
+            key=lambda label: abs(SPEED_TIERS[label] - configured_concurrency),
+        )
+        self.speed = LabeledDropdown(
+            self.speed_slot,
+            "Native Scan Speed",
+            list(SPEED_TIERS.keys()),
+            default=default_speed,
+            width=150,
+        )
 
         # inputs row 2
         row2 = ctk.CTkFrame(self, fg_color="transparent")
@@ -131,7 +162,7 @@ class ScanTab(ctk.CTkFrame):
             anchor="w",
         )
         self._desc_label.pack(side="left", padx=(12, 0), fill="x", expand=True)
-        self._on_profile_change(SCAN_PROFILES["native_quick"]["name"])
+        self._on_profile_change(SCAN_PROFILES[default_profile]["name"])
 
         # buttons
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -200,7 +231,24 @@ class ScanTab(ctk.CTkFrame):
                 desc = prof["description"]
                 if prof.get("requires_admin"):
                     desc += "  [requires admin]"
+                if prof.get("extended"):
+                    desc += "  [explicit authorization required]"
                 self._desc_label.configure(text=desc)
+                native = bool(prof.get("native"))
+                self.timing.dropdown.configure(state="disabled" if native else "normal")
+                self.speed.dropdown.configure(state="normal" if native else "disabled")
+                self.custom_args.entry.configure(state="disabled" if native else "normal")
+                # Timing is Nmap's speed control, while concurrency is the
+                # native scanner's speed control. Show the applicable control
+                # instead of leaving an unrelated greyed-out control visible.
+                if native:
+                    self.timing.pack_forget()
+                    if not self.speed.winfo_manager():
+                        self.speed.pack(fill="x")
+                else:
+                    self.speed.pack_forget()
+                    if not self.timing.winfo_manager():
+                        self.timing.pack(fill="x")
                 break
 
     def _get_selected_profile_key(self):
@@ -211,14 +259,32 @@ class ScanTab(ctk.CTkFrame):
         return "native_quick"
 
     def _on_start_scan(self):
+        if self._scanning:
+            return
         target = self.target.get()
         if not target:
+            self._set_status("Enter a target before starting a scan", "error")
             return
 
         custom = self.custom_args.get()
         profile_key = self._get_selected_profile_key()
         ports = self.ports.get() or None
         is_native = profile_key.startswith("native_")
+
+        profile_data = SCAN_PROFILES.get(profile_key, {})
+        custom_uses_full_vuln = bool(
+            custom and re.search(r"--script(?:=|\s+)[^\s]*vuln(?:,|\s|$)", custom)
+        )
+        if profile_data.get("extended") or custom_uses_full_vuln:
+            if not messagebox.askyesno(
+                "NetRecon: Confirm Extended Nmap Checks",
+                "This scan can run Nmap scripts tagged intrusive, exploit, or "
+                "denial-of-service. Some scripts can discover or contact systems "
+                "other than the target and may send service metadata to external "
+                "providers.\n\nOnly continue when the work order explicitly "
+                "authorizes these checks and their full network scope.\n\nContinue?",
+            ):
+                return
 
         speed_label = self.speed.get()
         concurrency = SPEED_TIERS.get(speed_label, SPEED_TIERS[DEFAULT_SPEED])
@@ -234,68 +300,111 @@ class ScanTab(ctk.CTkFrame):
                 return
 
         self._scanning = True
+        self._scan_started_at = time.perf_counter()
+        self._progress_percent = None
+        self._progress_detail = ""
+        self._last_console_progress_bucket = None
         self.scan_btn.configure(state="disabled")
-        self.cancel_btn.configure(state="normal")
+        self.cancel_btn.configure(state="normal", text="Cancel")
         self.progress.set(0)
         self.progress.configure(mode="indeterminate")
         self.progress.start()
         self.console.clear()
         self._set_status("Scanning ...", "info")
+        self.after(1000, self._refresh_scan_elapsed)
 
-        if not is_native and not custom:
-            timing = self.timing.get()
-            profile_args = SCAN_PROFILES.get(profile_key, {}).get("args", "")
-            profile_args = re.sub(r"-T\d", timing, profile_args)
-            custom_final = profile_args
-        else:
-            custom_final = custom if custom else None
+        timing_value = self.timing.get()
+        timing = (
+            timing_value
+            if not is_native and not custom and timing_value != "Profile default"
+            else None
+        )
 
         def callback(msg):
-            self.after(0, self.console.append_line, msg, "info")
+            match = SCAN_PROGRESS_RE.search(msg)
+            if not match:
+                self.post_ui(self.console.append_line, msg, "info")
+                return
+            percent = max(0.0, min(float(match.group(1)), 100.0))
+            detail = match.group(2).strip()
+            self.post_ui(self._update_scan_progress, percent, detail)
+
+            # Keep the output useful without adding one line every second.
+            bucket = (detail.split(";", 1)[0], int(percent) // 10)
+            if bucket != self._last_console_progress_bucket:
+                self._last_console_progress_bucket = bucket
+                self.post_ui(self.console.append_line, msg, "info")
 
         def task():
             try:
-                if is_native:
-                    if profile_key == "native_full":
-                        port_list = list(range(1, 65536))
-                        port_spec = None
-                    else:
-                        port_list = None
-                        port_spec = ports
-                    result = self.engine.native_scan(
-                        target,
-                        ports=port_list,
-                        port_spec=port_spec,
-                        concurrency=concurrency,
-                        callback=callback,
-                    )
-                elif custom:
-                    result = self.engine.scan(
-                        target, custom_args=custom_final, ports=ports, callback=callback
-                    )
-                else:
-                    result = self.engine.scan(
-                        target,
-                        profile=profile_key,
-                        custom_args=custom_final,
-                        ports=ports,
-                        callback=callback,
-                    )
-                self._last_result = result
-                self.after(0, self._scan_finished, result)
+                result = self.engine.scan(
+                    target,
+                    profile=profile_key,
+                    custom_args=custom or None,
+                    ports=ports,
+                    callback=callback,
+                    timing=timing,
+                    concurrency=concurrency if is_native else None,
+                )
+                self.post_ui(self._scan_finished, result)
             except Exception as exc:
-                self.after(0, self._scan_error, str(exc))
+                log.exception("Unhandled scan worker error")
+                self.post_ui(self._scan_error, str(exc))
 
         threading.Thread(target=task, daemon=True).start()
 
+    def _update_scan_progress(self, percent, detail):
+        if not self._scanning:
+            return
+        self._progress_percent = percent
+        self._progress_detail = detail
+        self.progress.stop()
+        self.progress.configure(mode="determinate")
+        self.progress.set(percent / 100.0)
+        self._refresh_scan_elapsed(schedule_next=False)
+
+    def _refresh_scan_elapsed(self, schedule_next=True):
+        if not self._scanning or self._scan_started_at is None:
+            return
+        elapsed = int(time.perf_counter() - self._scan_started_at)
+        if self._progress_percent is None:
+            text = f"Scanning ... {elapsed}s elapsed"
+        else:
+            text = (
+                f"{self._progress_detail} | {self._progress_percent:.1f}% | "
+                f"{elapsed}s elapsed"
+            )
+        self._set_status(text, "info")
+        if schedule_next:
+            self.after(1000, self._refresh_scan_elapsed)
+
     def _on_cancel(self):
-        self.engine.cancel()
-        self._set_status("Cancelling scan ...", "warning")
+        if not self._scanning:
+            return
+        self.cancel_btn.configure(state="disabled", text="Cancelling...")
+        if self.engine.cancel():
+            self._set_status("Cancelling scan ...", "warning")
+        else:
+            # A click can land in the few milliseconds between creating the
+            # worker thread and the engine marking itself active. Retry off the
+            # UI thread so that even this immediate-cancel case is honored.
+            self._set_status("Cancelling scan ...", "warning")
+
+            def cancel_when_started():
+                for _ in range(100):
+                    if not self._scanning:
+                        return
+                    if self.engine.cancel():
+                        return
+                    threading.Event().wait(0.005)
+
+            threading.Thread(target=cancel_when_started, daemon=True).start()
 
     def _scan_error(self, msg):
         self._scanning = False
+        self._scan_started_at = None
         self.scan_btn.configure(state="normal")
-        self.cancel_btn.configure(state="disabled")
+        self.cancel_btn.configure(state="disabled", text="Cancel")
         self.progress.stop()
         self.progress.configure(mode="determinate")
         self.progress.set(0)
@@ -304,16 +413,23 @@ class ScanTab(ctk.CTkFrame):
 
     def _scan_finished(self, result):
         self._scanning = False
+        self._scan_started_at = None
         self.scan_btn.configure(state="normal")
-        self.cancel_btn.configure(state="disabled")
+        self.cancel_btn.configure(state="disabled", text="Cancel")
         self.progress.stop()
         self.progress.configure(mode="determinate")
-        self.progress.set(1)
+        self.progress.set(0 if result.cancelled else 1)
 
-        if result.error:
+        if result.cancelled:
+            self._last_result = None
+            self.console.append_line("\n  Scan cancelled.", "warning")
+            self._set_status("Scan cancelled", "warning")
+        elif result.error:
+            self._last_result = None
             self.console.append_line(f"\n  Error: {result.error}", "error")
             self._set_status("Scan failed", "error")
         else:
+            self._last_result = result
             self._display_result(result)
             self._set_status(
                 f"Scan complete: {result.total_hosts} hosts, "
@@ -343,7 +459,11 @@ class ScanTab(ctk.CTkFrame):
         self.console.append_line("")
 
         for host in result.hosts:
-            state_tag = "success" if host["state"] == "up" else "error"
+            state_tag = {
+                "up": "success",
+                "down": "error",
+                "unknown": "warning",
+            }.get(host["state"], "warning")
             self.console.append_line(
                 f"  Host: {host['ip']}  ({host['hostname']})  [{host['state']}]",
                 state_tag,
@@ -442,6 +562,11 @@ class ScanTab(ctk.CTkFrame):
     def _clear(self):
         self.console.clear()
         self._last_result = None
+
+    def shutdown(self):
+        """Stop any active backend before the window closes."""
+        if self._scanning:
+            self.engine.cancel()
 
     def _set_status(self, msg, level="info"):
         if self.status:

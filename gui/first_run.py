@@ -10,8 +10,11 @@ import tkinter as tk
 import customtkinter as ctk
 
 from netrecon import preferences, __version__
+from netrecon import logger as nr_logger
 from .theme import COLORS, FONT_FAMILY
 
+
+log = nr_logger.get_logger("gui.first_run")
 
 NOTICE_TEXT = (
     "NetRecon is a network diagnostics and authorized security testing toolkit.\n\n"
@@ -28,7 +31,7 @@ CONFIRM_LABEL = (
 
 
 def needs_acceptance() -> bool:
-    return not preferences.is_responsible_use_accepted()
+    return not preferences.is_responsible_use_accepted(__version__)
 
 
 class ResponsibleUseDialog(ctk.CTkToplevel):
@@ -132,8 +135,8 @@ class ResponsibleUseDialog(ctk.CTkToplevel):
             x = px + (pw - w) // 2
             y = py + (ph - h) // 2
             self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Could not center responsible-use window: %s", type(exc).__name__)
 
     def _on_toggle(self):
         if self._agree_var.get():
