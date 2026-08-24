@@ -20,6 +20,8 @@ Usage:
 
 import argparse
 import json
+import sys
+from pathlib import Path
 
 from netrecon import (
     DNSEngine,
@@ -290,9 +292,18 @@ def _print_dns(result):
     print()
 
 
+def _is_cli_executable():
+    """Return True for the packaged Windows console entry point."""
+    return bool(
+        getattr(sys, "frozen", False)
+        and Path(sys.executable).stem.casefold() == "netrecon-cli"
+    )
+
+
 def main():
+    cli_executable = _is_cli_executable()
     parser = argparse.ArgumentParser(
-        prog="netrecon",
+        prog="NetRecon-CLI" if cli_executable else "netrecon",
         description="NetRecon: Network Reconnaissance Toolkit (by PradaFit)",
     )
     parser.add_argument("--cli", action="store_true", help="Interactive terminal mode")
@@ -340,7 +351,7 @@ def main():
 
     args = parser.parse_args()
 
-    if args.cli:
+    if args.cli or (cli_executable and args.command is None):
         cli_interactive()
     elif args.command == "dns":
         return cli_dns(args)
@@ -350,7 +361,6 @@ def main():
         return cli_geo(args)
     else:
         # Default: launch GUI
-        _show_banner()
         try:
             from gui.app import launch_gui
 

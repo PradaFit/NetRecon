@@ -25,8 +25,21 @@ netrecon_exports/
 *~
 main4/
 
-# Packaging / installer (kept local, not published to repo)
-packaging/
+# Packaging outputs and private signing material. Build scripts, manifests,
+# icons, and other corresponding source under packaging/ are public.
+packaging/Output/
+packaging/msix-stage/
+packaging/__pycache__/
+packaging/LICENSE.txt
+packaging/DISCLAIMER.txt
+packaging/dev-msix.pfx
+packaging/dev-msix.cer
+packaging/trusted-signing.json
+packaging/*.bak
+*.pfx
+*.p12
+*.pem
+*.key
 
 # Internal release/store prep docs (kept local, not published to repo)
 RELEASE_CHECKLIST.md

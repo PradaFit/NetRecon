@@ -19,7 +19,7 @@ Developed by PradaFit.
 - Automatic updates through the Microsoft Store
 - Available through the Microsoft Store as a full-trust packaged desktop app
 
-The GitHub releases page continues to host the standalone Inno Setup installer (`NetRecon-Setup-*.exe`) and the source distribution for users who prefer manual install, portable use, or building from source. Both editions share the same engine, feature set, and local-first design.
+The GitHub releases page continues to host the standalone Inno Setup installer (`NetRecon-Setup-*.exe`) and source code for users who prefer manual installation or building from source. Both editions come from the same codebase, although a Store update can appear later while Microsoft completes certification.
 
 | Edition | Distribution | Updates | Best for |
 | --- | --- | --- | --- |
@@ -144,7 +144,7 @@ This is useful if you want one tool for both collection and handoff.
 
 ### Option A: Windows Installer
 
-Download the latest `NetRecon-Setup-*.exe` from the Releases page (or install from the Microsoft Store) and run it. The installer supports Windows 10 (1809+) and Windows 11 on x64, creates Start Menu and optional desktop shortcuts, and preserves user data under `%USERPROFILE%\.netrecon` across upgrades and uninstalls.
+Download the latest `NetRecon-Setup-*.exe` from the Releases page (or install from the Microsoft Store) and run it. The installer supports Windows 10 (1809+) and Windows 11 on x64, installs separate GUI and console executables, creates Start Menu and optional desktop shortcuts, and preserves user data under `%USERPROFILE%\.netrecon` across upgrades and uninstalls.
 
 ### Option B: From Source
 
@@ -175,32 +175,39 @@ python main.py --cli
 
 ## CLI Examples
 
+Windows installer builds include `NetRecon-CLI.exe`. Open **NetRecon CLI**
+from the Start Menu for interactive mode, or run commands from the install
+directory. The 2.0.4 Microsoft Store package registers the
+`netrecon-cli.exe` execution alias. Source checkouts can replace
+`NetRecon-CLI.exe` with `python main.py`
+in the examples below.
+
 ### DNS lookup
 
 ```bash
-python main.py dns example.com
-python main.py dns example.com --type MX
+NetRecon-CLI.exe dns example.com
+NetRecon-CLI.exe dns example.com --type MX
 ```
 
 ### Native port scan
 
 ```bash
-python main.py scan 192.168.1.1
-python main.py scan 192.168.1.1 --profile native_custom --ports 22,80,443
+NetRecon-CLI.exe scan 192.168.1.1
+NetRecon-CLI.exe scan 192.168.1.1 --profile native_custom --ports 22,80,443
 ```
 
 ### Nmap-backed scan
 
 ```bash
-python main.py scan 192.168.1.1 --nmap
-python main.py scan 192.168.1.0/24 --profile quick --nmap
+NetRecon-CLI.exe scan 192.168.1.1 --nmap
+NetRecon-CLI.exe scan 192.168.1.0/24 --profile quick --nmap
 ```
 
 ### IP geolocation
 
 ```bash
-python main.py geo 8.8.8.8
-python main.py geo --myip
+NetRecon-CLI.exe geo 8.8.8.8
+NetRecon-CLI.exe geo --myip
 ```
 
 ## Installation Notes
@@ -210,9 +217,31 @@ python main.py geo --myip
 - The project was developed and tested around Python `3.12`
 - GUI support depends on `customtkinter` and `Pillow`
 
+## Building Windows Packages
+
+The repository includes the PyInstaller, Inno Setup, and MSIX sources used for
+Windows releases. Use Python 3.12 on an x64 Windows system.
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+.\packaging\build.ps1
+```
+
+The build produces `NetRecon.exe` for the desktop GUI and
+`NetRecon-CLI.exe` for terminal use. `build.ps1` replaces the local `dist\`
+and `build\` folders before a full build. Use `build-msix.ps1` for an MSIX
+package. Production Store MSIX files are submitted unsigned because the
+Microsoft Store signs accepted packages. Standalone public installers should
+be Authenticode-signed with `sign-release.ps1` and a trusted certificate.
+
+Signing credentials, development certificates, staged packages, and generated
+installer output are excluded from source control.
+
 ## Security Notes
 
 NetRecon includes input validation and defensive handling in the core engines.
+Report suspected vulnerabilities privately by following [SECURITY.md](SECURITY.md).
 
 - target and port input validation for IPv4, IPv6, CIDR, and hostnames; native profiles intentionally accept one host while Nmap profiles accept CIDR
 - a strict custom Nmap option allowlist; file inputs/outputs, proxies, external data files, resume, arbitrary NSE paths, and script arguments are rejected
@@ -232,8 +261,11 @@ This does not make reckless scanning safe. It means the application is not casua
 |-- main.py
 |-- config.json
 |-- requirements.txt
+|-- SECURITY.md
 |-- gui/
 |-- netrecon/
+|-- packaging/
+|-- tests/
 |-- DISCLAIMER.md
 |-- LICENSE
 ```

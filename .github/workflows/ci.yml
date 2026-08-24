@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install verification dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: Lint
+        run: python -m ruff check main.py netrecon gui tests packaging
+
+      - name: Run source security checks
+        run: python -m bandit -q -ll -r main.py netrecon gui packaging
+
+      - name: Audit runtime dependencies
+        run: python -m pip_audit -r requirements.txt
+
+      - name: Audit development and build dependencies
+        run: |
+          python -m pip_audit -r requirements-dev.txt
+          python -m pip_audit -r requirements-build.txt
+
+      - name: Run core tests
+        run: python -m pytest -q tests/test_core.py
+
+      - name: Compile Python sources
+        run: python -m compileall -q main.py netrecon gui tests packaging
+
+  windows-package:
+    needs: quality
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+
+      - name: Install build dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-build.txt
+
+      - name: Build GUI and CLI executables
+        run: python -m PyInstaller --noconfirm --clean packaging\NetRecon.spec
+
+      - name: Verify packaged entry points
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $gui = ".\dist\NetRecon\NetRecon.exe"
+          $cli = ".\dist\NetRecon\NetRecon-CLI.exe"
+          if (-not (Test-Path -LiteralPath $gui -PathType Leaf)) {
+            throw "Missing GUI executable: $gui"
+          }
+          if (-not (Test-Path -LiteralPath $cli -PathType Leaf)) {
+            throw "Missing CLI executable: $cli"
+          }
+          function Get-PeSubsystem([string]$Path) {
+            $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $Path).Path)
+            $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+            return [BitConverter]::ToUInt16($bytes, $peOffset + 92)
+          }
+          if ((Get-PeSubsystem $gui) -ne 2) {
+            throw "NetRecon.exe is not a Windows GUI-subsystem executable."
+          }
+          if ((Get-PeSubsystem $cli) -ne 3) {
+            throw "NetRecon-CLI.exe is not a Windows console-subsystem executable."
+          }
+          $version = & $cli --version
+          if ($LASTEXITCODE -ne 0 -or $version -notmatch "NetRecon 2\.0\.4") {
+            throw "Packaged CLI version check failed."
+          }

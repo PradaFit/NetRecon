@@ -4,6 +4,7 @@ import shlex
 import socket
 import threading
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from netrecon.geo_engine import GeoEngine, GeoResult
 from netrecon.scan_engine import SCAN_PROFILES, ScanEngine
 from netrecon.validator import InputError, sanitize_nmap_args
 from netrecon import __version__
+import main as app_main
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +43,9 @@ def test_release_version_metadata_is_consistent():
     assert four_part in (ROOT / "packaging" / "version_info.txt").read_text(
         encoding="utf-8"
     )
+    assert four_part in (ROOT / "packaging" / "version_info_cli.txt").read_text(
+        encoding="utf-8"
+    )
     assert four_part in (ROOT / "packaging" / "NetRecon.iss").read_text(
         encoding="utf-8"
     )
@@ -50,6 +55,60 @@ def test_release_version_metadata_is_consistent():
     assert four_part in (ROOT / "packaging" / "AppxManifest.dev.xml").read_text(
         encoding="utf-8"
     )
+
+
+def test_packaged_cli_executable_is_detected_by_name(monkeypatch, tmp_path):
+    monkeypatch.setattr(app_main.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(
+        app_main.sys, "executable", str(tmp_path / "NetRecon-CLI.exe")
+    )
+    assert app_main._is_cli_executable() is True
+
+    monkeypatch.setattr(app_main.sys, "executable", str(tmp_path / "NetRecon.exe"))
+    assert app_main._is_cli_executable() is False
+
+
+def test_packaging_source_defines_gui_cli_and_store_alias():
+    spec = (ROOT / "packaging" / "NetRecon.spec").read_text(encoding="utf-8")
+    assert 'name="NetRecon"' in spec
+    assert 'name="NetRecon-CLI"' in spec
+    assert "console=False" in spec
+    assert "console=True" in spec
+
+    inno = (ROOT / "packaging" / "NetRecon.iss").read_text(encoding="utf-8")
+    assert '#define MyCliExeName     "NetRecon-CLI.exe"' in inno
+    assert "{#MyCliExeName}" in inno
+
+    uap5 = "http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+    for manifest_name in ("AppxManifest.xml", "AppxManifest.dev.xml"):
+        root = ET.parse(ROOT / "packaging" / manifest_name).getroot()
+        alias = root.find(f".//{{{uap5}}}ExecutionAlias")
+        assert alias is not None
+        assert alias.attrib["Alias"] == "netrecon-cli.exe"
+
+
+def test_packaging_credentials_and_generated_output_remain_ignored():
+    ignore = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "packaging/" not in ignore
+    for pattern in (
+        "packaging/Output/",
+        "packaging/msix-stage/",
+        "packaging/dev-msix.pfx",
+        "packaging/dev-msix.cer",
+        "packaging/trusted-signing.json",
+        "*.pfx",
+        "*.key",
+    ):
+        assert pattern in ignore
+
+
+def test_msix_build_requires_legal_and_privacy_documents():
+    build_script = (ROOT / "packaging" / "build-msix.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert '$RequiredDocs = @("LICENSE", "PRIVACY.md", "DISCLAIMER.md")' in build_script
+    assert "Required MSIX document not found" in build_script
+    assert "best effort" not in build_script
 
 
 def test_all_nmap_profiles_build_valid_arguments_with_overrides():

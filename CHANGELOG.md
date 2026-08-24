@@ -20,6 +20,14 @@
 - Added regression coverage for every Nmap/native speed-control transition, programmatic dropdown changes, progress rendering, timeout injection, and extended-profile confirmation.
 - Synchronized application, executable, installer, development manifest, and Microsoft Store package inputs at version 2.0.4 / 2.0.4.0.
 
+### Packaging and repository
+
+- Added `NetRecon-CLI.exe` as a console-subsystem executable alongside the windowed `NetRecon.exe` GUI.
+- Added an installer shortcut and Microsoft Store execution alias for the packaged CLI.
+- Added the packaging scripts, manifests, version resources, and image assets needed to reproduce release builds while excluding generated output and signing credentials.
+- Made the license, privacy policy, and disclaimer mandatory inputs for MSIX builds.
+- Added a security reporting policy and a Windows CI workflow for linting, tests, dependency auditing, and dual-executable build checks.
+
 ## 2.0.3 - 2026-08-23
 
 ### Fixed
